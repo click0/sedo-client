@@ -1,0 +1,112 @@
+---
+# Щоденна перевірка СЕДО ЗСУ (sedo.mod.gov.ua)
+# Використовує PKCS#11 backend (PKCS11_EKeyAlmaz1C.dll)
+
+- name: СЕДО ЗСУ — щоденна перевірка
+  hosts: sedo_workers
+  gather_facts: false
+  vars_files:
+    - ../inventory/vault.yml
+
+  vars:
+    date_today: "{{ lookup('pipe', 'date +%Y-%m-%d') }}"
+    output_dir: "{{ client_path }}\\downloads\\{{ date_today }}"
+    pkcs11_module: "{{ client_path }}\\libs\\PKCS11_EKeyAlmaz1C.dll"
+
+  tasks:
+    - name: Перевірка Windows Smart Card service
+      ansible.windows.win_service:
+        name: SCardSvr
+        state: started
+        start_mode: auto
+
+    - name: Перевірка що PKCS#11 модуль доступний
+      ansible.windows.win_stat:
+        path: "{{ pkcs11_module }}"
+      register: pkcs11_check
+
+    - name: Зупинити якщо DLL відсутня
+      ansible.builtin.fail:
+        msg: "PKCS11_EKeyAlmaz1C.dll не знайдено в {{ pkcs11_module }}"
+      when: not pkcs11_check.stat.exists
+
+    - name: Перевірка Алмаз
+      ansible.windows.win_shell: |
+        Get-PnpDevice -PresentOnly -Status OK |
+          Where-Object { $_.FriendlyName -like "*Almaz*" -or $_.FriendlyName -like "*IIT*" } |
+          Select-Object -First 1 FriendlyName
+      register: almaz_check
+      changed_when: false
+
+    - name: Stop якщо Алмаз не підключений
+      ansible.builtin.fail:
+        msg: "Алмаз-1К не виявлено"
+      when: almaz_check.stdout | trim == ""
+
+    - name: Створити директорію для завантажень
+      ansible.windows.win_file:
+        path: "{{ output_dir }}"
+        state: directory
+
+    - name: Запуск клієнта з PKCS#11 backend
+      ansible.windows.win_command:
+        cmd: >
+          "{{ python_path }}" "{{ client_path }}\sedo_client.py"
+          --url "https://sedo.mod.gov.ua"
+          --backend pkcs11
+          --module "{{ pkcs11_module }}"
+          --pin "{{ almaz_pins[inventory_hostname] }}"
+          --fetch
+          --since "{{ date_today }}"
+          --output "{{ output_dir }}"
+      no_log: true
+      register: sedo_result
+      changed_when: sedo_result.rc == 0
+      failed_when: sedo_result.rc not in [0, 2]
+
+    - name: Знайти завантажені файли
+      ansible.windows.win_find:
+        paths: "{{ output_dir }}"
+        patterns: "*.zip"
+      register: downloaded
+
+    - name: Fetch на Linux controller
+      ansible.builtin.fetch:
+        src: "{{ item.path }}"
+        dest: "/opt/sedo-reports/{{ inventory_hostname }}/{{ date_today }}/"
+        flat: yes
+      loop: "{{ downloaded.files }}"
+      when: downloaded.files | length > 0
+
+- name: Верифікація на Linux controller
+  hosts: localhost
+  gather_facts: false
+  vars:
+    date_today: "{{ lookup('pipe', 'date +%Y-%m-%d') }}"
+
+  tasks:
+    - name: Знайти завантажені ZIP
+      ansible.builtin.find:
+        paths: "/opt/sedo-reports"
+        patterns: "*.zip"
+        recurse: true
+      register: zip_files
+
+    - name: ua-sign-verify на кожен
+      ansible.builtin.command:
+        cmd: >
+          python3 /opt/ua-sign-verify/cli/main.py "{{ item.path }}"
+          --result-dir "/opt/sedo-reports/verified/{{ date_today }}"
+          --no-console
+      loop: "{{ zip_files.files }}"
+      register: verify_results
+      changed_when: false
+      failed_when: false
+
+    - name: Звіт
+      ansible.builtin.debug:
+        msg: |
+          Всього:   {{ verify_results.results | length }}
+          Валідних: {{ verify_results.results | selectattr('rc', 'eq', 0) | list | length }}
+          Warning:  {{ verify_results.results | selectattr('rc', 'eq', 1) | list | length }}
+          Помилки:  {{ verify_results.results | selectattr('rc', 'ne', 0) | selectattr('rc', 'ne', 1) | list | length }}

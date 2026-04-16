@@ -1,0 +1,11 @@
+---
+# Зашифрувати: ansible-vault encrypt vault.yml
+# Розшифрувати: ansible-vault decrypt vault.yml
+# Використати: ansible-playbook ... --ask-vault-pass
+
+almaz_pins:
+  ws01: "ENTER_PIN_HERE"
+
+telegram:
+  bot_token: "1234567890:ABCDEF..."
+  chat_id: "@your_channel_or_id"
