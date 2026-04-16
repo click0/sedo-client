@@ -7,6 +7,44 @@ Contact:  github.com/click0
 License:  BSD 3-Clause "New" or "Revised" License
 ```
 
+## v0.26 — 2026-04-16
+
+### Виправлено
+
+- `sedo_client.py`: прибрано мертву гілку `if sedo.authorize(...)` (метод лише raises)
+- `sedo_client.py`: виправлено ненадійну заміну URL у `_flow_direct_kep`
+  (`url.rsplit("/", 1)` замість подвійного `replace`)
+- `sedo_client.py`: `_flow_cms_post` тепер raises `NotImplementedError`
+  замість тихого повернення `False`
+- `sedo_client.py`: `IITAgentAdapter.login` raises при невідомому envelope
+  сертифіката замість тихого `None`
+- `iit_client.py`: `origin` default → `https://sedo.mod.gov.ua`
+  (був старий `sedo.gov.ua`)
+- `iit_client.py`: `r.json()` обгорнуто у `try/except` для не-JSON відповідей
+- `iit_client.py`: виправлено partial-return при `OSError` у читанні реєстру
+- `iit_client.py`: suppress `urllib3.InsecureRequestWarning`
+  для self-signed HTTPS-агента
+- `opensc_signer.py`: замінено bare `except: pass` на `except OSError`
+- `opensc_signer.py`: `tempfile.mkstemp` + `os.close` щоб `pkcs11-tool`
+  міг відкрити вихідний файл на Windows
+- `pkcs11_signer.py`: прибрано малоймовірний шлях `SysWOW64`, додано
+  підтверджений інсталером IIT шлях `EKeys\Almaz1C`
+- `ansible/inventory/hosts.yml`: `sedo_url` → `sedo.mod.gov.ua`
+- `ansible/playbooks/sedo_daily.yml`: використовує `{{ sedo_url }}`
+  з інвентарю, прибрано фантомний `rc=2` у `failed_when`
+- `docs/IIT-ANALYSIS.md`: усі приклади оновлено на `sedo.mod.gov.ua`
+
+### Змінено
+
+- `tests/conftest.py`: новий файл з централізованим `sys.path`
+- Прибрано `sys.path.insert(0, "..")` хак зі `test_iit_client.py`
+
+### Безпека
+
+- Задокументовано leak PIN через командний рядок `pkcs11-tool`
+  (видимий іншим локальним користувачам); рекомендація `backend=iit_agent`
+  для багатокористувацьких worker-ів
+
 ## v0.25 — 2026-04-16
 
 ### Проривні

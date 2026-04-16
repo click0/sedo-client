@@ -3,7 +3,7 @@
 ```
 Project:  sedo-client
 Author:   Vladyslav V. Prodan
-Version:  0.25
+Version:  0.26
 License:  BSD 3-Clause
 Year:     2025-2026
 ```
@@ -260,7 +260,7 @@ url = "http://127.0.0.1:8081/json-rpc"
 headers = {
     "Content-Type": "application/json",
     "Origin": "https://sedo.mod.gov.ua",
-    "User-Agent": "sedo-client/0.25",
+    "User-Agent": "sedo-client/0.26",
 }
 
 # 1. Initialize

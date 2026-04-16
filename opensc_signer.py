@@ -4,7 +4,7 @@ PKCS#11 клієнт через subprocess до OpenSC pkcs11-tool.exe.
 Author:   Vladyslav V. Prodan
 Contact:  github.com/click0
 Phone:    +38(099)6053340
-Version:  0.25
+Version:  0.26
 License:  BSD 3-Clause "New" or "Revised" License
 Year:     2025-2026
 """
