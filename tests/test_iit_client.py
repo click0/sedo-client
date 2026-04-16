@@ -5,10 +5,10 @@
 Інтеграційні тести з реальним агентом — в test_integration.py.
 """
 
-import pytest
-from unittest.mock import patch, MagicMock, call
 import sys
-sys.path.insert(0, "..")
+from unittest.mock import patch, MagicMock
+
+import pytest
 
 import iit_client
 from iit_client import IITClient, IITRPCError, IITAgentNotFound
@@ -155,10 +155,10 @@ class TestHeaders:
         """Origin header має бути встановлений для CORS."""
         mock_session = MagicMock()
         mock_session_cls.return_value = mock_session
-        client = IITClient(port=9100, origin="https://sedo.gov.ua")
+        client = IITClient(port=9100, origin="https://sedo.mod.gov.ua")
         assert mock_session.headers.update.called
         headers = mock_session.headers.update.call_args[0][0]
-        assert headers["Origin"] == "https://sedo.gov.ua"
+        assert headers["Origin"] == "https://sedo.mod.gov.ua"
         assert headers["Content-Type"] == "application/json"
 
 

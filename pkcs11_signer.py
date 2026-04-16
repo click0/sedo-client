@@ -52,10 +52,11 @@ class PKCS11Signer:
     """
 
     DEFAULT_MODULE_PATHS = [
+        # Підтверджений інсталером IIT шлях — див. README.md / opensc-test-almaz.ps1
+        r"C:\Program Files (x86)\Institute of Informational Technologies\EKeys\Almaz1C\PKCS11.EKeyAlmaz1C.dll",
         r"C:\Program Files (x86)\Institute of Informational Technologies\ЄвроЗнак\PKCS11_EKeyAlmaz1C.dll",
         r"C:\Program Files (x86)\Institute of Informational Technologies\Користувач ЦСК\PKCS11_EKeyAlmaz1C.dll",
         r"C:\Program Files\Institute of Informational Technologies\PKCS11_EKeyAlmaz1C.dll",
-        r"C:\Windows\SysWOW64\PKCS11_EKeyAlmaz1C.dll",
         "./PKCS11_EKeyAlmaz1C.dll",
         "./libs/PKCS11_EKeyAlmaz1C.dll",
     ]

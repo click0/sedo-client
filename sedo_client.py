@@ -21,17 +21,6 @@ log = logging.getLogger(__name__)
 # Фіксоване посилання — СЕДО ЗСУ, не старе sedo.gov.ua
 SEDO_MOD_URL = "https://sedo.mod.gov.ua"
 
-# Стандартні шляхи IIT на Windows
-IIT_AGENT_CERT_PATH = Path(
-    r"C:\ProgramData\Institute of Informational Technologies"
-    r"\Certificate Authority-1.3\End User\Sign Agent"
-)
-IIT_AGENT_CERT_FILES = {
-    "agent_cert": "EUSignAgent.cer",        # self-signed cert of agent
-    "agent_pem":  "EUSignAgent.pem",         # CMS container
-    "agent_ca":   "EUSignAgentCA.cer",       # CA that signed agent
-}
-
 
 class Signer(Protocol):
     """Абстрактний підписник."""
@@ -169,7 +158,8 @@ class SEDOClient:
 
                 signature = self.signer.sign(challenge_bytes)
 
-                verify_url = url.replace("/init", "/verify").replace("/challenge", "/verify")
+                # Замінюємо лише останній сегмент шляху, не випадкові підрядки
+                verify_url = url.rsplit("/", 1)[0] + "/verify"
                 r2 = self.session.post(verify_url, json={
                     "signature": base64.b64encode(signature).decode(),
                     "certificate": base64.b64encode(cert).decode(),
@@ -182,8 +172,10 @@ class SEDOClient:
 
     def _flow_cms_post(self, cert: bytes, pin: str) -> bool:
         """Повний CAdES-BES підпис, який відправляється на сервер."""
-        # TODO: треба знати точне тіло що підписується
-        return False
+        raise NotImplementedError(
+            "CMS POST flow requires Fiddler capture of real SEDO auth "
+            "to know exact endpoint and signed payload format"
+        )
 
     # ─── Робота з документами ────────────────────────────────
 
@@ -225,12 +217,18 @@ class IITAgentAdapter:
         self._device = devices[0]
         self._c.read_private_key(self._device, pin)
         certs = self._c.enum_own_certificates()
-        cert_info = self._c.get_own_certificate(0) if certs else {}
-        # get_own_certificate повертає DER у полі 'data' або подібному
+        if not certs:
+            raise RuntimeError("No certificates bound to private key")
+        cert_info = self._c.get_own_certificate(0)
+        # get_own_certificate повертає DER у полі 'data' (hex) — див. docs/PROTOCOL-JSON-RPC.md
         if "data" in cert_info:
             self._cert_bytes = bytes.fromhex(cert_info["data"])
         elif "certificate" in cert_info:
             self._cert_bytes = base64.b64decode(cert_info["certificate"])
+        else:
+            raise RuntimeError(
+                f"Unknown cert envelope; keys: {list(cert_info.keys())}"
+            )
 
     def get_certificate(self) -> bytes:
         if self._cert_bytes is None:
@@ -279,15 +277,15 @@ def main():
     try:
         with SEDOClient(sedo_url=args.url, backend=args.backend,
                         module_path=args.module) as sedo:
-            if sedo.authorize(args.pin):
-                print("✓ Авторизація успішна")
+            sedo.authorize(args.pin)
+            print("✓ Авторизація успішна")
 
-                if args.fetch:
-                    docs = sedo.fetch_inbox(since=args.since)
-                    print(f"📄 Документів: {len(docs)}")
-                    for doc in docs:
-                        path = sedo.download_document(doc["id"], output_dir)
-                        print(f"  ✓ {path.name}")
+            if args.fetch:
+                docs = sedo.fetch_inbox(since=args.since)
+                print(f"📄 Документів: {len(docs)}")
+                for doc in docs:
+                    path = sedo.download_document(doc["id"], output_dir)
+                    print(f"  ✓ {path.name}")
     except Exception as e:
         log.error("❌ %s", e)
         sys.exit(1)

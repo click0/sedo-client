@@ -53,7 +53,7 @@ def classify_session(sess: dict) -> dict:
         classification = "sedo"
     elif "id.gov.ua" in host:
         classification = "oidc_idp"
-    elif "sedo.gov.ua" in host:
+    elif host.endswith("sedo.gov.ua"):
         classification = "sedo_old"
 
     return {

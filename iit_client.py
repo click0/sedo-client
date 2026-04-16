@@ -9,11 +9,8 @@ License:  BSD 3-Clause "New" or "Revised" License
 Year:     2025-2026
 """
 
-import json
 import logging
 import sys
-import uuid
-from pathlib import Path
 from typing import Any, Optional
 
 import requests
@@ -79,6 +76,7 @@ def read_port_from_registry() -> tuple[Optional[int], Optional[int]]:
             continue
         except OSError as e:
             log.warning("Registry read failed: %s", e)
+            continue
 
     return http_port, https_port
 
@@ -196,7 +194,7 @@ class IITClient:
     """
 
     def __init__(self, host: str = "127.0.0.1", port: int = 9100,
-                 use_https: bool = False, origin: str = "https://sedo.gov.ua",
+                 use_https: bool = False, origin: str = "https://sedo.mod.gov.ua",
                  timeout: float = 30.0):
         self.host = host
         self.port = port
@@ -213,7 +211,13 @@ class IITClient:
             "User-Agent": "sedo-automation/1.0",
         })
         if use_https:
-            self.session.verify = False  # self-signed cert локально
+            # self-signed cert агента локально на 127.0.0.1 — pinning не потрібен
+            self.session.verify = False
+            try:
+                import urllib3
+                urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            except ImportError:
+                pass
 
         self._rpc_id = 0
         self._session_id: Optional[str] = None
@@ -256,7 +260,11 @@ class IITClient:
         if r.status_code != 200:
             raise IITRPCError(r.status_code, f"HTTP {r.status_code}: {r.text[:200]}")
 
-        data = r.json()
+        try:
+            data = r.json()
+        except ValueError as e:
+            raise IITRPCError(-1, f"Agent returned non-JSON: {r.text[:200]}") from e
+
         if "error" in data and data["error"] is not None:
             err = data["error"]
             raise IITRPCError(err.get("code", -1),
@@ -264,7 +272,7 @@ class IITClient:
                               err.get("data"))
 
         result = data.get("result")
-        log.debug("← %s", result if not isinstance(result, bytes) else f"<{len(result)} bytes>")
+        log.debug("← %s", result)
         return result
 
     # ─── Життєвий цикл ───────────────────────────────────────

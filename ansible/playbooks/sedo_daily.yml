@@ -52,7 +52,7 @@
       ansible.windows.win_command:
         cmd: >
           "{{ python_path }}" "{{ client_path }}\sedo_client.py"
-          --url "https://sedo.mod.gov.ua"
+          --url "{{ sedo_url }}"
           --backend pkcs11
           --module "{{ pkcs11_module }}"
           --pin "{{ almaz_pins[inventory_hostname] }}"
@@ -62,7 +62,7 @@
       no_log: true
       register: sedo_result
       changed_when: sedo_result.rc == 0
-      failed_when: sedo_result.rc not in [0, 2]
+      failed_when: sedo_result.rc != 0
 
     - name: Знайти завантажені файли
       ansible.windows.win_find:
