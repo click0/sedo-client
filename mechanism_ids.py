@@ -4,7 +4,7 @@ PKCS#11 mechanism ID констант для української крипто
 Author:   Vladyslav V. Prodan
 Contact:  github.com/click0
 Phone:    +38(099)6053340
-Version:  0.25
+Version:  0.26
 License:  BSD 3-Clause "New" or "Revised" License
 Year:     2025-2026
 """
