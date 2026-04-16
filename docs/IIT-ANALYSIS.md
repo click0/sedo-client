@@ -27,7 +27,7 @@ Year:     2025-2026
 ## 1. Архітектура підтверджена
 
 ```
-Браузер (Edge/Chrome, JS на sedo.gov.ua)
+Браузер (Edge/Chrome, JS на sedo.mod.gov.ua)
      │
      │ HTTP POST на 127.0.0.1:<port>/json-rpc
      ▼
@@ -78,7 +78,7 @@ KM.PKCS11.dll (router для зовнішніх PKCS#11 модулів)
 | Протокол | JSON-RPC 2.0 |
 | WebSocket | підтримка Upgrade, Sec-WebSocket-Key |
 | CORS headers | `Access-Control-Allow-Origin`, `Access-Control-Max-Age`, `Access-Control-Allow-Private-Network` |
-| TrustedSites | whitelist з реєстру (куди занесено `sedo.gov.ua` тощо) |
+| TrustedSites | whitelist з реєстру (куди занесено `sedo.mod.gov.ua` тощо) |
 
 **C++ класи (RTTI):**
 - `EUHTTPWebServer`, `EUHTTPWebServerConnection`, `EUHTTPWebServerDelegate`
@@ -359,7 +359,7 @@ class IITClient:
         if self.session_id:
             payload["session_id"] = self.session_id
         r = self.session.post(self.base, json=payload,
-                              headers={"Origin": "https://sedo.gov.ua"})
+                              headers={"Origin": "https://sedo.mod.gov.ua"})
         r.raise_for_status()
         data = r.json()
         if "error" in data:
@@ -383,7 +383,7 @@ class IITClient:
 ```yaml
 - name: Авторизація в СЕДО
   ansible.windows.win_command:
-    cmd: python sedo_client.py --pin {{ vault_pin }} --url https://sedo.gov.ua
+    cmd: python sedo_client.py --pin {{ vault_pin }} --url https://sedo.mod.gov.ua
   no_log: true
 ```
 
@@ -422,7 +422,7 @@ class IITClient:
    ```
    Шукаємо: HTTPPort, HTTPSPort, TrustedSites
 
-2. **Fiddler capture** під час логіну на sedo.gov.ua:
+2. **Fiddler capture** під час логіну на sedo.mod.gov.ua:
    - `GET <sedo>/auth`
    - `GET` на 127.0.0.1:port (challenge/init)
    - `POST /json-rpc` з Initialize, потім ReadPrivateKey, потім SignData
