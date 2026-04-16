@@ -1,7 +1,9 @@
 # sedo-client
 
-**Автоматизація СЕДО Збройних Сил України** (`sedo.mod.gov.ua`)  
-через Алмаз-1К USB токен і ІІТ "Користувач ЦСК-1".
+**Automation of the Ukrainian Armed Forces EDMS** (`sedo.mod.gov.ua`)
+via the Almaz-1K USB token and IIT "Користувач ЦСК-1" (End User).
+
+*Читати українською: [README_uk.md](README_uk.md).*
 
 ```
 Author:   Vladyslav V. Prodan
@@ -14,18 +16,19 @@ Year:     2025-2026
 
 ---
 
-## Призначення
+## Purpose
 
-Щоденний cron з Linux:
+A nightly cron job driven from a Linux host that:
 
-1. Заходить у СЕДО ЗСУ через Алмаз-1К (КЕП підпис)
-2. Завантажує нові документи
-3. Верифікує підписи через `ua-sign-verify`
-4. Шле Telegram-звіт
+1. Logs into the SEDO portal of the Armed Forces of Ukraine using an Almaz-1K
+   qualified electronic signature (KEP)
+2. Downloads new documents from the inbox
+3. Verifies signatures with [`ua-sign-verify`](https://github.com/click0)
+4. Sends a Telegram report
 
-Все працює автоматично без втручання оператора.
+Everything runs unattended — no operator prompts.
 
-## Архітектура
+## Architecture
 
 ```
 Linux Ansible controller
@@ -36,51 +39,51 @@ Windows worker
     ├── sedo_client.py (Python)
     │       │
     │       └─ opensc_signer.py  ──▶  pkcs11-tool.exe  (OpenSC 32-bit)
-    │              або
+    │              or
     │           pkcs11_signer.py ──▶  PyKCS11
-    │              або
-    │           iit_client.py    ──▶  JSON-RPC до EUSignAgent
+    │              or
+    │           iit_client.py    ──▶  JSON-RPC to EUSignAgent
     │                                    │
     │                                    ▼
-    │                         IIT "Користувач ЦСК" (GUI запущено)
+    │                         IIT "Користувач ЦСК" (GUI running)
     │
     └── PKCS11.EKeyAlmaz1C.dll + CSPBase.dll + CSPExtension.dll + *.cap
             │
             ▼ WinSCard (PC/SC)
-        Алмаз-1К USB
+        Almaz-1K USB
 ```
 
-Три backend на вибір:
+Three selectable backends:
 
-| Backend | Перевага | Залежність |
+| Backend | Pros | Dependency |
 |---|---|---|
-| **`opensc`** | Простий, вбудований OpenSC tool | Тільки 32-bit OpenSC |
-| `pkcs11` | Швидший, Python-native | OpenSC + PyKCS11 |
-| `iit_agent` | Без OpenSC зовсім | "Користувач ЦСК" GUI запущено |
+| **`opensc`** | Simplest, ships with OpenSC | 32-bit OpenSC only |
+| `pkcs11`    | Faster, Python-native        | OpenSC + PyKCS11 |
+| `iit_agent` | No OpenSC required           | IIT "Користувач ЦСК" GUI running |
 
-## Швидкий старт
+## Quick start
 
 ### Windows worker
 
 ```powershell
-# 1. Встановити Python і залежності
+# 1. Install Python and dependencies
 winget install Python.Python.3.12
 git clone <repo> C:\sedo-client
 cd C:\sedo-client
 pip install -r requirements.txt
 
-# 2. Валідація всього стеку
+# 2. Validate the whole stack
 .\opensc-test-almaz.ps1
-# Має вивести:
-#   - Знайдено PKCS11.EKeyAlmaz1C.dll
-#   - Бітність: 32-bit, PickedTool: 32-bit OpenSC ✓
+# Expected output:
+#   - Found PKCS11.EKeyAlmaz1C.dll
+#   - Bitness: 32-bit, PickedTool: 32-bit OpenSC ✓
 #   - Reader: IIT E.Key Almaz-1C 0
-#   - 12 mechanisms, включно з 0x80420031 (DSTU 4145 sign)
+#   - 12 mechanisms, including 0x80420031 (DSTU 4145 sign)
 
-# 3. Тест підпису (обережно!)
+# 3. Signing test (careful — uses real token)
 .\opensc-test-almaz.ps1 -Pin XXXX -TestSign
 
-# 4. Реальний запуск
+# 4. Real run
 python sedo_client.py --backend opensc `
     --module "C:\Program Files (x86)\Institute of Informational Technologies\EKeys\Almaz1C\PKCS11.EKeyAlmaz1C.dll" `
     --pin XXXX --fetch
@@ -91,51 +94,66 @@ python sedo_client.py --backend opensc `
 ```bash
 cd ansible
 ansible-vault create inventory/vault.yml
-# (формат — див. vault.yml.example)
+# (format — see vault.yml.example)
 
 ansible-playbook -i inventory/hosts.yml playbooks/sedo_daily.yml --ask-vault-pass
 
-# Cron щодня о 8:00
+# Daily cron at 08:00
 0 8 * * * cd /opt/sedo-client/ansible && \
     ansible-playbook -i inventory/hosts.yml playbooks/sedo_daily.yml \
         --vault-password-file /opt/sedo-client/.vault_pass \
         >> /var/log/sedo-client.log 2>&1
 ```
 
-## Структура
+## Layout
 
 ```
 sedo-client/
-├── iit_client.py         — JSON-RPC клієнт до EUSignAgent
-├── pkcs11_signer.py      — PyKCS11 backend
-├── opensc_signer.py      — OpenSC subprocess backend (рекомендовано)
-├── sedo_client.py        — бізнес-логіка, авто-вибір backend
-├── mechanism_ids.py      — константи mechanism IDs
+├── sedo_client.py              — business logic, auto backend picker, CLI
+├── iit_client.py               — JSON-RPC client for EUSignAgent
+├── opensc_signer.py            — OpenSC subprocess backend (recommended)
+├── pkcs11_signer.py            — PyKCS11 direct backend
+├── mechanism_ids.py            — PKCS#11 mechanism ID constants (DSTU 4145)
+├── opensc-test-almaz.ps1       — PowerShell stack validator for Windows
+├── requirements.txt
 ├── tests/
-│   └── test_iit_client.py — 13 юніт-тестів
+│   ├── conftest.py
+│   └── test_iit_client.py      — 13 unit tests
 ├── scripts/
-│   ├── fiddler_analyze.py — розбирає SAZ capture  
-│   └── smoke_test.py
+│   ├── fiddler_analyze.py      — parses a Fiddler SAZ capture
+│   └── smoke_test.py           — quick environment check
 ├── ansible/
 │   ├── inventory/
 │   │   ├── hosts.yml
 │   │   └── vault.yml.example
 │   └── playbooks/
 │       └── sedo_daily.yml
-├── SETUP-WINDOWS.md      — покроковий checklist Windows
-├── OPENSC-QUICKSTART.md  — робота з OpenSC напряму
-├── FIDDLER-CAPTURE-GUIDE.md — як зафіксувати auth flow СЕДО
-└── requirements.txt
+├── docs/                       — architecture, reverse-engineering report,
+│                                 JSON-RPC protocol, mechanism table
+├── .github/workflows/
+│   ├── spellcheck.yml          — cspell on push / PR
+│   └── release.yml             — triggered by v* tags
+├── .cspell.json
+├── README.md                   — this file (English)
+├── README_uk.md                — Ukrainian version
+├── SETUP-WINDOWS.md            — step-by-step Windows checklist
+├── OPENSC-QUICKSTART.md        — hands-on OpenSC reference
+├── FIDDLER-CAPTURE-GUIDE.md    — how to capture SEDO auth flow
+├── CHANGELOG.md
+└── LICENSE
 ```
 
-## Безпека
+## Security
 
-⚠️ **Алмаз-1К знищує приватний ключ після 15 невдалих спроб PIN.**
-- Валідуйте PIN вручну перед автоматизацією
-- Зберігайте PIN тільки в Ansible Vault
-- `no_log: true` у всіх task-ах де фігурує PIN
+⚠️ **The Almaz-1K destroys the private key after 15 failed PIN attempts.**
+- Validate the PIN by hand before enabling automation
+- Store the PIN only in Ansible Vault
+- Use `no_log: true` on every task that handles the PIN
+- The `opensc` backend passes the PIN on the `pkcs11-tool` command line,
+  where it is visible to other local users via the process list; on
+  multi-user Windows workers prefer `backend=iit_agent`
 
-## Тести
+## Tests
 
 ```bash
 pip install pytest requests
@@ -143,78 +161,112 @@ python -m pytest tests/ -v
 # 13 passed
 ```
 
-## Залежні проекти
+## CI
 
-- **ua-sign-verify** ([github.com/click0](https://github.com/click0)) — верифікатор КЕП підписів ДСТУ 4145 / ГОСТ 34.311
+- **Spellcheck** (`.github/workflows/spellcheck.yml`) — `cspell` runs on every
+  push and pull request against `main`. Cyrillic runs are ignored via a regex
+  in `.cspell.json`; the whitelist covers project jargon (DSTU, PKCS, IIT,
+  Kupyna, Kalyna, …).
+- **Release** (`.github/workflows/release.yml`) — triggered by pushing a
+  `v*` tag. Runs the test suite, extracts the matching section from
+  `CHANGELOG.md`, packages `tar.gz` + `zip` archives, and publishes a
+  GitHub Release.
 
-## Посилання
+To cut a release:
+
+```bash
+git tag v0.26
+git push origin v0.26
+```
+
+## Related projects
+
+- **ua-sign-verify** ([github.com/click0](https://github.com/click0)) —
+  verifier for DSTU 4145 / Kupyna / GOST 34.311 KEP signatures, used on the
+  Linux controller to verify documents after they are downloaded.
+
+## Links
 
 - IIT "Користувач ЦСК-1": https://iit.com.ua/download/productfiles/users
 - OpenSC: https://github.com/OpenSC/OpenSC
-- СЕДО ЗСУ: https://sedo.mod.gov.ua
+- SEDO (Armed Forces of Ukraine): https://sedo.mod.gov.ua
 
 ---
 
-## Документація
+## Documentation
 
-Детальна документація у [`docs/`](docs/):
+Detailed documentation lives in [`docs/`](docs/):
 
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — огляд архітектури, data flow
-- [`docs/IIT-ANALYSIS.md`](docs/IIT-ANALYSIS.md) — повний звіт реверс-інжинірингу 36+ DLL ІІТ
-- [`docs/MECHANISM-IDS.md`](docs/MECHANISM-IDS.md) — 12 PKCS#11 mechanism IDs Алмаз-1К
-- [`docs/PROTOCOL-JSON-RPC.md`](docs/PROTOCOL-JSON-RPC.md) — JSON-RPC протокол IIT агента
-- [`docs/REVERSE-METHODOLOGY.md`](docs/REVERSE-METHODOLOGY.md) — методологія аналізу DLL
-- [`docs/MINIMUM-FILES-LIST.md`](docs/MINIMUM-FILES-LIST.md) — deployment минимум
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — architecture overview and
+  data flow
+- [`docs/IIT-ANALYSIS.md`](docs/IIT-ANALYSIS.md) — full reverse-engineering
+  report of 36+ IIT DLLs
+- [`docs/MECHANISM-IDS.md`](docs/MECHANISM-IDS.md) — 12 PKCS#11 mechanism IDs
+  of Almaz-1K
+- [`docs/PROTOCOL-JSON-RPC.md`](docs/PROTOCOL-JSON-RPC.md) — IIT agent
+  JSON-RPC protocol reference
+- [`docs/REVERSE-METHODOLOGY.md`](docs/REVERSE-METHODOLOGY.md) — DLL analysis
+  methodology
+- [`docs/MINIMUM-FILES-LIST.md`](docs/MINIMUM-FILES-LIST.md) — deployment
+  minimum
 
-Setup гайди:
+Setup guides:
 
-- [`SETUP-WINDOWS.md`](SETUP-WINDOWS.md) — покрокове налаштування Windows worker
-- [`OPENSC-QUICKSTART.md`](OPENSC-QUICKSTART.md) — OpenSC команди для Алмаз
-- [`FIDDLER-CAPTURE-GUIDE.md`](FIDDLER-CAPTURE-GUIDE.md) — як зафіксувати auth flow СЕДО
-- [`CHANGELOG.md`](CHANGELOG.md) — історія версій
+- [`SETUP-WINDOWS.md`](SETUP-WINDOWS.md) — Windows worker walkthrough
+- [`OPENSC-QUICKSTART.md`](OPENSC-QUICKSTART.md) — OpenSC commands for Almaz
+- [`FIDDLER-CAPTURE-GUIDE.md`](FIDDLER-CAPTURE-GUIDE.md) — capturing the SEDO
+  auth flow
+- [`CHANGELOG.md`](CHANGELOG.md) — version history
 
 ---
 
-## Prior art та пов'язані проекти
+## Prior art and related work
 
-Ми вивчали існуючі рішення на GitHub перед створенням sedo-client. **Прямого
-аналога для автоматизації `sedo.mod.gov.ua` + Алмаз-1К + Ansible не існує** —
-sedo-client заповнює цю нішу.
+We surveyed GitHub before building sedo-client. **No direct equivalent exists
+for `sedo.mod.gov.ua` + Almaz-1K + Ansible automation** — sedo-client fills
+that gap.
 
-Однак ми спираємось на кілька чудових проектів:
+### Ukrainian cryptography
 
-### Українська криптографія
-
-- **[dstucrypt](https://github.com/dstucrypt)** (Ilya Muromec) — повна екосистема DSTU 4145:
-  - [`dstu-engine`](https://github.com/dstucrypt/dstu-engine) — активний OpenSSL engine для DSTU 4145/7564/28147. Альтернатива ІІТ DLL на Linux
-  - [`agent`](https://github.com/dstucrypt/agent) — Node.js agent для підпису через Key-6.dat
+- **[dstucrypt](https://github.com/dstucrypt)** (Ilya Muromec) — a full
+  DSTU 4145 ecosystem:
+  - [`dstu-engine`](https://github.com/dstucrypt/dstu-engine) — active OpenSSL
+    engine for DSTU 4145 / 7564 / 28147; an alternative to the IIT DLLs on
+    Linux
+  - [`agent`](https://github.com/dstucrypt/agent) — Node.js signing agent for
+    `Key-6.dat`
   - [`jkurwa`](https://github.com/dstucrypt/jkurwa) — JavaScript DSTU 4145
-  - [`dstu-validator`](https://github.com/dstucrypt/dstu-validator) — HTTP API верифікатор
+  - [`dstu-validator`](https://github.com/dstucrypt/dstu-validator) — HTTP
+    API verifier
 
-- **[GorulkoAV/EUSignDFS](https://github.com/GorulkoAV/EUSignDFS)** — C# wrapper для `EUSignCP.dll`
-  (для Державної фіскальної служби). Показує підхід до P/Invoke IIT бібліотеки.
+- **[GorulkoAV/EUSignDFS](https://github.com/GorulkoAV/EUSignDFS)** — C#
+  wrapper around `EUSignCP.dll` (for Ukraine's State Fiscal Service);
+  demonstrates the P/Invoke approach to IIT libraries.
 
-### Інфраструктура
+### Infrastructure
 
-- **[LudovicRousseau/CCID](https://github.com/LudovicRousseau/CCID)** — офіційний CCID driver.
-  Алмаз-1К (`0x03EB:0x9324`) підтримується з версії 1.4.15. Linux + `pcscd` читає токен нативно.
+- **[LudovicRousseau/CCID](https://github.com/LudovicRousseau/CCID)** —
+  official CCID driver. Almaz-1K (`0x03EB:0x9324`) has been supported since
+  1.4.15; Linux + `pcscd` talks to the token natively.
 
-- **[OpenSC/OpenSC](https://github.com/OpenSC/OpenSC)** — крос-платформовий PC/SC middleware.
-  `pkcs11-tool` використовується як головний інструмент валідації у `opensc-test-almaz.ps1`.
+- **[OpenSC/OpenSC](https://github.com/OpenSC/OpenSC)** — cross-platform
+  PC/SC middleware. `pkcs11-tool` is the primary validation tool in
+  `opensc-test-almaz.ps1`.
 
-- **[LudovicRousseau/PyKCS11](https://github.com/LudovicRousseau/PyKCS11)** — Python binding
-  для PKCS#11, використовується у `pkcs11_signer.py` backend.
+- **[LudovicRousseau/PyKCS11](https://github.com/LudovicRousseau/PyKCS11)** —
+  Python bindings for PKCS#11, used by the `pkcs11_signer.py` backend.
 
-### Верифікація підписів
+### Signature verification
 
-- **[ua-sign-verify](https://github.com/click0)** (цей проект автора) — верифікатор КЕП підписів
-  ДСТУ 4145 / Kupyna / ГОСТ 34.311. Використовується у sedo-client для post-fetch верифікації
-  завантажених документів на Linux controller.
+- **[ua-sign-verify](https://github.com/click0)** (author's own project) —
+  DSTU 4145 / Kupyna / GOST 34.311 KEP signature verifier. sedo-client calls
+  it on the Linux controller to verify every fetched document.
 
-### Чого НЕ існує
+### What does not exist elsewhere
 
-Наш проект — єдиний публічний, що покриває:
-- Автоматизацію авторизації СЕДО ЗСУ (`sedo.mod.gov.ua`)
-- Інтеграцію Ansible playbook ↔ Windows worker ↔ Алмаз-1К
-- Трьохбекендну архітектуру (opensc / pkcs11 / iit_agent)
-- Повний cycle: login → fetch → verify → Telegram report
+Our project is the only publicly available tool that covers all of:
+
+- SEDO Armed Forces (`sedo.mod.gov.ua`) login automation
+- Ansible playbook ↔ Windows worker ↔ Almaz-1K integration
+- Three-backend architecture (opensc / pkcs11 / iit_agent)
+- The full cycle: login → fetch → verify → Telegram report
