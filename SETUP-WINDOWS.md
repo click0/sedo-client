@@ -337,6 +337,23 @@ oSession.host = "ipv4.fiddler:" + oSession.port;
 
 ---
 
+## FAQ
+
+### Crystal-1 vs Almaz-1K
+
+If Windows shows `E.key_Crystal-1` instead of `E.key_Almaz-1C` in the reader
+list, you have a **different IIT token** (Crystal-1). sedo-client does **not**
+support Crystal-1:
+
+- Crystal-1 uses a raw USB driver (`EKeyCr1N.sys`), not PC/SC CCID
+- Its VID:PID (`03EB:9301`) differs from Almaz-1K (`03EB:9324`)
+- The PKCS#11 module (`PKCS11.EKeyCrystal1.dll`) has a different internal
+  architecture and OID tree
+
+See `docs/IIT-ANALYSIS-ADDENDUM-v3.md` for details.
+
+---
+
 ## Контроль часу
 
 | Крок | Час | Статус |

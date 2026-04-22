@@ -35,9 +35,10 @@ class SEDOClient:
 
     def __init__(self, sedo_url: str = SEDO_MOD_URL,
                  backend: str = "auto",
-                 module_path: Optional[str] = None):
+                 module_path: Optional[str] = None,
+                 key_file: Optional[str] = None):
         self.sedo_url = sedo_url.rstrip("/")
-        self.signer: Signer = self._pick_backend(backend, module_path)
+        self.signer: Signer = self._pick_backend(backend, module_path, key_file)
 
         self.session = requests.Session()
         self.session.headers.update({
@@ -45,13 +46,15 @@ class SEDOClient:
             "Accept-Language": "uk,en;q=0.5",
         })
 
-    def _pick_backend(self, name: str, module_path: Optional[str]) -> Signer:
+    def _pick_backend(self, name: str, module_path: Optional[str],
+                      key_file: Optional[str] = None) -> Signer:
         """
         Вибирає backend:
         - 'opensc'    — OpenSC pkcs11-tool.exe (найпростіший, рекомендовано)
-        - 'pkcs11'    — PyKCS11 + PKCS11_EKeyAlmaz1C.dll
+        - 'pkcs11'    — PyKCS11 + PKCS11_EKeyAlmaz1C.dll (HW token)
+        - 'virtual'   — PyKCS11 + PKCS11.Virtual.EKeyAlmaz1C.dll + Key-6.dat
         - 'iit_agent' — JSON-RPC до EUSignAgent (потребує GUI)
-        - 'auto'      — opensc → pkcs11 → iit_agent
+        - 'auto'      — opensc → pkcs11 → virtual → iit_agent
         """
         if name in ("opensc", "auto"):
             try:
@@ -75,7 +78,19 @@ class SEDOClient:
             except Exception as e:
                 if name == "pkcs11":
                     raise
-                log.info("PyKCS11 unavailable (%s), falling back to IIT Agent", e)
+                log.info("PyKCS11 unavailable (%s), trying Virtual", e)
+
+        if name in ("virtual", "auto"):
+            try:
+                from virtual_signer import VirtualSigner
+                signer = VirtualSigner(module_path=module_path,
+                                       key_file=key_file)
+                log.info("Backend: Virtual token (Key-6.dat, no USB)")
+                return signer
+            except Exception as e:
+                if name == "virtual":
+                    raise
+                log.info("Virtual unavailable (%s), falling back to IIT Agent", e)
 
         # Fallback: IIT Agent JSON-RPC
         from iit_client import IITClient, IITAgentNotFound
@@ -252,9 +267,12 @@ def main():
     parser.add_argument("--url", default=SEDO_MOD_URL,
                         help=f"СЕДО URL (default: {SEDO_MOD_URL})")
     parser.add_argument("--backend", default="auto",
-                        choices=["auto", "opensc", "pkcs11", "iit_agent"],
+                        choices=["auto", "opensc", "pkcs11", "virtual",
+                                 "iit_agent"],
                         help="Signing backend")
-    parser.add_argument("--module", help="Path to PKCS11_EKeyAlmaz1C.dll")
+    parser.add_argument("--module", help="Path to PKCS#11 module DLL")
+    parser.add_argument("--key-file",
+                        help="Path to Key-6.dat (virtual backend)")
     parser.add_argument("--pin", help="Token PIN")
     parser.add_argument("--fetch", action="store_true")
     parser.add_argument("--since", help="Fetch docs since YYYY-MM-DD")
@@ -276,7 +294,8 @@ def main():
 
     try:
         with SEDOClient(sedo_url=args.url, backend=args.backend,
-                        module_path=args.module) as sedo:
+                        module_path=args.module,
+                        key_file=getattr(args, 'key_file', None)) as sedo:
             sedo.authorize(args.pin)
             print("✓ Авторизація успішна")
 

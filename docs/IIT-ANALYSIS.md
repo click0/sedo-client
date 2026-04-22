@@ -266,7 +266,8 @@ CRL / OCSP:
 | Властивість | Значення |
 |---|---|
 | Роль | Прямий CCID driver для Алмаз-1К |
-| Розмір | 676 KB |
+| Розмір | 585 KB (64-bit) / 691 KB (32-bit) |
+| Версія | 1.0.1.9 |
 | Експорти | `KMEnumDeviceTypes`, `KMGetInterface`, `KMFinalize` |
 | Imports | **Тільки WinSCard (8 функцій) + KERNEL32 + ADVAPI32** |
 
@@ -289,7 +290,12 @@ g_rgSCardT1Pci         ← T=1 protocol PCI
 
 APDU формуються динамічно на стеці (не byte-literals в .rdata), тому статичний strings-пошук не дає повної картини. Потрібен runtime трейс через API Monitor на `SCardTransmit`.
 
-Ідентифікатор mutex: `Global\EKAlmaz1COpenMutex` — синхронізація доступу до пристрою між процесами.  
+Mutex-и:
+- `Global\EKAlmaz1CMutex` — блокування паралельних сесій
+- `Global\EKAlmaz1CMemory` — shared memory між процесами
+
+⚠️ HW і Virtual-модулі використовують **ті самі mutex-и** — одночасний запуск спричинить конфлікт.
+
 Reader name pattern: `IIT E.Key Almaz-1C`.
 
 ---
@@ -302,7 +308,7 @@ Reader name pattern: `IIT E.Key Almaz-1C`.
 
 | Модуль | Токен | Примітка |
 |---|---|---|
-| `PKCS11.EKeyAlmaz1C.dll` | E.key_Almaz-1C | **НЕ у Web.zip** — ключовий артефакт! |
+| `PKCS11.EKeyAlmaz1C.dll` | E.key_Almaz-1C | ✅ Отримано (v1.0.1.7, 32+64-bit, PKCS#11 v2.40, 68 функцій) |
 | `PKCS11.Virtual.EKeyAlmaz1C.dll` | E.key_Almaz-1C | Віртуальний (без HW) |
 | `PKCS11.EKeyCrystal1.dll` | E.key_Crystal-1 | |
 | `PKCS11.NCMGryada301.dll` | NCM_Gryada301 | OID 1.3.6.1.4.1.19398.1.1.8.31 |
@@ -317,11 +323,31 @@ Reader name pattern: `IIT E.Key Almaz-1C`.
 | `dkck201.dll` | (Aladdin PKI) | |
 | `cihsm.dll` | Cipher-HSM | OID 1.3.6.1.4.1.19398.1.1.8.25 |
 
-**Критично:** якщо дістати `PKCS11.EKeyAlmaz1C.dll` з повного інсталятора IIT:
-1. Це стандартний PKCS#11 модуль
-2. Може бути завантажений у OpenSSL 4.0 через pkcs11-provider
-3. Може бути скопійований на Linux (можливо через wine або після перекомпіляції, якщо знайдеться .so варіант)
-4. Шлях В (20 тижнів) зменшується до **1-2 тижнів**
+**Статус:** `PKCS11.EKeyAlmaz1C.dll` отримано (див. ADDENDUM v1, v6).
+32-bit chain повністю зібраний для production:
+1. Стандартний PKCS#11 v2.40 модуль (68 функцій, 37 активних на HW)
+2. Може бути завантажений у OpenSSL через pkcs11-provider
+3. На Linux працює через Wine (32-bit prefix) + pcscd для USB
+4. Шлях В1 — **production-ready** (2-3 тижні, деталі в ADDENDUM v5-v6)
+
+### KM-архітектура (ADDENDUM v6)
+
+```
+KM.dll  ─── базовий диспетчер, вибирає модуль за типом токена
+ ├── KM_FileSystem.dll    ─── файлові ключі (Key-6.dat)
+ ├── KM_PKCS11.dll        ─── router для зовнішніх PKCS#11 модулів
+ └── KM_EKeyAlmaz1C.dll   ─── прямий HW драйвер Алмаз-1К
+```
+
+### Runtime залежності
+
+| DLL | Версія | Роль |
+|---|---|---|
+| CSPBase.dll | 1.1.0.172-173 | DSTU 4145/7564/7624, 133 функції |
+| CSPExtension.dll | 1.1.0.17 | RNG self-test (BSI AIS 31), 5 функцій |
+| CSPIBase.dll | — | Міжнародна крипто (AES/SHA/RSA/DH/ECDSA), 145 функцій |
+| PKIFormats.dll | 1.2.0.163-171 | ASN.1/X.509 парсинг, 3 функції через vtable |
+| EUSignCP.dll | 1.3.1.209 | Потрібна лише для Virtual-токена, 619 функцій |
 
 ---
 
@@ -387,57 +413,32 @@ class IITClient:
   no_log: true
 ```
 
-### Шлях В (pure Linux) — два варіанти
+### Шлях В (pure Linux) — статус
 
-**Варіант В1 — знайти PKCS11.EKeyAlmaz1C.dll:**
-- Завантажити повний IIT інсталятор (не Web-subset)
-- Виділити `PKCS11.EKeyAlmaz1C.dll`
-- Запустити через Wine на Linux, з pcscd для USB доступу
-- Або: експортувати як ctypes бібліотеку
-- **Оцінка: 1-2 тижні** замість 20
+**Варіант В1 (PKCS11 + Wine):** ✅ `PKCS11.EKeyAlmaz1C.dll` отримано.
+32-bit chain зібрано. Production-ready через Wine. Деталі — ADDENDUM v5, v6.
 
-**Варіант В2 — open-almaz з нуля (оригінальний план):**
-- Реверс-інжиніринг APDU через API Monitor на SCardTransmit
-- Написати `open_almaz.so` на C++
-- Розробити PKCS#11 інтерфейс з нуля
-- **Оцінка: 13-20 тижнів**
-
-Рекомендація: спочатку спробувати В1 — він швидший і менш ризикований.
+**Варіант В2 (open-almaz):** не потрібен — В1 закриває потребу.
 
 ---
 
-## 8. Що робити зараз
+## 8. Прогрес
 
-### Негайно (без нової інформації)
+### Реалізовано (v0.26)
 
-1. Написати Python JSON-RPC клієнт (скелет вище) — 1-2 дні
-2. Додати до проекту ua-sign-verify модуль `iit_client.py`
-3. Підготувати Ansible playbook для WinRM-виклику агента
+- ✅ Python JSON-RPC клієнт (`iit_client.py`) — з auto-discovery агента
+- ✅ OpenSC subprocess backend (`opensc_signer.py`)
+- ✅ PyKCS11 direct backend (`pkcs11_signer.py`)
+- ✅ SEDOClient з авто-вибором backend (`sedo_client.py`)
+- ✅ Ansible playbook для WinRM (`ansible/playbooks/sedo_daily.yml`)
+- ✅ 13 юніт-тестів, GitHub Actions (spellcheck + release)
+- ✅ `PKCS11.EKeyAlmaz1C.dll` отримано (v1.0.1.7, 32+64-bit)
+- ✅ 32-bit runtime chain зібрано (ADDENDUM v5, v6)
 
-### Потребує Windows-машини з IIT + Алмаз
+### Наступні кроки
 
-1. **Дамп реєстру:**
-   ```
-   reg export "HKLM\SOFTWARE\Institute of Informational Technologies" iit_registry.reg
-   ```
-   Шукаємо: HTTPPort, HTTPSPort, TrustedSites
-
-2. **Fiddler capture** під час логіну на sedo.mod.gov.ua:
-   - `GET <sedo>/auth`
-   - `GET` на 127.0.0.1:port (challenge/init)
-   - `POST /json-rpc` з Initialize, потім ReadPrivateKey, потім SignData
-   - Відповідь на СЕДО
-
-3. **Файл `ospus.ini`** — знайти (зазвичай `%PROGRAMDATA%\IIT` або `%APPDATA%\IIT`)
-
-4. **Повний інсталятор IIT** (не Web.zip):
-   - Перевірити наявність `PKCS11.EKeyAlmaz1C.dll`
-   - Якщо є — одразу відкриває Шлях В1
-
-### Додаткові бібліотеки які б допомогли
-
-- `ospus.ini` — точна конфігурація
-- `PKCS11.EKeyAlmaz1C.dll` — ключ до Linux-шляху
-- JS-файл IIT віджета (у коді Edge extension або локально) — фактичні виклики з браузера
-- Будь-який інший DLL не з Web-підмножини (бо він робочий, а Web — це для вбудовування)
+1. Virtual backend (`--backend virtual --key-file Key-6.dat`) — без USB-токена
+2. Linux/Wine deployment cookbook
+3. Ansible playbook для Linux worker (без WinRM)
+4. Fiddler capture реального auth flow СЕДО → фінальні `_flow_*` методи
 
