@@ -10,10 +10,47 @@ Year:     2025-2026
 """
 
 import logging
+import sys
 from pathlib import Path
 from typing import Optional
 
 log = logging.getLogger(__name__)
+
+# Mutex-и які створює PKCS11.EKeyAlmaz1C.dll (ADDENDUM v1, v2).
+# HW та Virtual модулі тримають ті самі mutex-и — одночасний запуск конфліктує.
+ALMAZ_MUTEX_NAMES = [
+    "Global\\EKAlmaz1CMutex",
+    "Global\\EKAlmaz1CMemory",
+]
+
+
+def check_almaz_mutex() -> Optional[str]:
+    """
+    Check whether another IIT session already holds the Almaz-1K mutex.
+
+    Returns the name of the held mutex, or None if free.
+    Only works on Windows; returns None on other platforms.
+    """
+    if sys.platform != "win32":
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        OpenMutexW = kernel32.OpenMutexW
+        OpenMutexW.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR]
+        OpenMutexW.restype = wintypes.HANDLE
+        CloseHandle = kernel32.CloseHandle
+
+        SYNCHRONIZE = 0x00100000
+        for name in ALMAZ_MUTEX_NAMES:
+            handle = OpenMutexW(SYNCHRONIZE, False, name)
+            if handle:
+                CloseHandle(handle)
+                return name
+    except Exception as e:
+        log.debug("Mutex check failed: %s", e)
+    return None
 
 
 class PKCS11NotAvailable(Exception):
@@ -183,6 +220,13 @@ class PKCS11Signer:
     # ─── Session ─────────────────────────────────────────────
 
     def login(self, pin: str, slot: Optional[int] = None) -> None:
+        held = check_almaz_mutex()
+        if held:
+            log.warning(
+                "Another IIT session holds mutex %s. "
+                "Concurrent access may fail or corrupt token state.", held
+            )
+
         if slot is None:
             slots = self._pkcs11.getSlotList(tokenPresent=True)
             if not slots:

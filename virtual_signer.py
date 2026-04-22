@@ -108,6 +108,15 @@ class VirtualSigner:
         raise RuntimeError("No vendor signing mechanism found on virtual token")
 
     def login(self, pin: str, slot: Optional[int] = None) -> None:
+        from pkcs11_signer import check_almaz_mutex
+        held = check_almaz_mutex()
+        if held:
+            log.warning(
+                "Another IIT session holds mutex %s. "
+                "HW and Virtual modules share the same mutex — "
+                "concurrent access will fail.", held
+            )
+
         if slot is None:
             slots = self._pkcs11.getSlotList(tokenPresent=True)
             if not slots:

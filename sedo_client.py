@@ -11,12 +11,21 @@ Year:     2025-2026
 
 import base64
 import logging
+import os
 from pathlib import Path
 from typing import Optional, Protocol
 
 import requests
 
 log = logging.getLogger(__name__)
+
+# Standard locations for Key-6.dat (virtual token auto-detect)
+KEY_FILE_SEARCH_PATHS = [
+    Path("./Key-6.dat"),
+    Path("./libs/Key-6.dat"),
+    Path.home() / ".iit" / "Key-6.dat",
+    Path("/var/lib/sedo-client/Key-6.dat"),
+]
 
 # Фіксоване посилання — СЕДО ЗСУ, не старе sedo.gov.ua
 SEDO_MOD_URL = "https://sedo.mod.gov.ua"
@@ -83,8 +92,9 @@ class SEDOClient:
         if name in ("virtual", "auto"):
             try:
                 from virtual_signer import VirtualSigner
+                resolved_key = key_file or self._find_key_file()
                 signer = VirtualSigner(module_path=module_path,
-                                       key_file=key_file)
+                                       key_file=resolved_key)
                 log.info("Backend: Virtual token (Key-6.dat, no USB)")
                 return signer
             except Exception as e:
@@ -100,6 +110,20 @@ class SEDOClient:
             return IITAgentAdapter(client)
         except IITAgentNotFound as e:
             raise RuntimeError(f"No working backend: {e}")
+
+    @staticmethod
+    def _find_key_file() -> Optional[str]:
+        """Search standard locations for Key-6.dat (virtual token auto-detect)."""
+        wine_prefix = os.environ.get("WINEPREFIX")
+        if wine_prefix:
+            wine_candidate = Path(wine_prefix) / "drive_c" / "sedo-libs" / "Key-6.dat"
+            if wine_candidate.exists():
+                return str(wine_candidate)
+
+        for p in KEY_FILE_SEARCH_PATHS:
+            if p.exists():
+                return str(p)
+        return None
 
     # ─── Авторизація ─────────────────────────────────────────
 

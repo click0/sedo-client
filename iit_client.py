@@ -35,6 +35,12 @@ TRUSTED_SITES_PATH = (
     r"\Certificate Authority-1.3\End User\Libraries\Sign Agent\TrustedSites"
 )
 
+# Шлях реєстру EUSignCP.dll — конфігурація крипто-бібліотеки (ADDENDUM v5)
+EUSIGNCP_REGISTRY_PATH = (
+    r"SOFTWARE\Institute of Informational Technologies"
+    r"\Certificate Authority-1.3\End User\Libraries\Sign"
+)
+
 # Дефолтні порти — підтверджено реальними значеннями з реєстру
 DEFAULT_HTTP_PORT = 8081
 DEFAULT_HTTPS_PORT = 8083
@@ -106,6 +112,42 @@ def read_trusted_sites() -> list[str]:
         except FileNotFoundError:
             continue
     return sites
+
+
+def read_eusigncp_config() -> dict:
+    """
+    Read EUSignCP.dll configuration from the registry.
+
+    Returns a dict with available keys: Path, CertPath, PrivKeyPath, etc.
+    Only works on Windows. Returns empty dict otherwise.
+    """
+    if sys.platform != "win32":
+        return {}
+    try:
+        import winreg
+    except ImportError:
+        return {}
+
+    config = {}
+    value_names = [
+        "Path", "CertPath", "PrivKeyPath", "SSLKeyPath", "CACertPath",
+    ]
+    for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+        try:
+            with winreg.OpenKey(hive, EUSIGNCP_REGISTRY_PATH, 0,
+                                winreg.KEY_READ | winreg.KEY_WOW64_32KEY) as key:
+                for name in value_names:
+                    try:
+                        config[name] = winreg.QueryValueEx(key, name)[0]
+                    except FileNotFoundError:
+                        pass
+                if config:
+                    break
+        except FileNotFoundError:
+            continue
+        except OSError:
+            continue
+    return config
 
 
 def probe_port(host: str = "127.0.0.1", port: int = 9100,
