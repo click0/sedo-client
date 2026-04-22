@@ -1,10 +1,15 @@
 ---
-# Зашифрувати: ansible-vault encrypt vault.yml
-# Розшифрувати: ansible-vault decrypt vault.yml
-# Використати: ansible-playbook ... --ask-vault-pass
+# Encrypt:  ansible-vault encrypt vault.yml
+# Decrypt:  ansible-vault decrypt vault.yml
+# Use:      ansible-playbook ... --ask-vault-pass
 
+# PINs for Windows workers with hardware Almaz-1K tokens
 almaz_pins:
   ws01: "ENTER_PIN_HERE"
+
+# PINs for Linux workers with virtual tokens (Key-6.dat files)
+virtual_pins:
+  lin01: "ENTER_PIN_HERE"
 
 telegram:
   bot_token: "1234567890:ABCDEF..."

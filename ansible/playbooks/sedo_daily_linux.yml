@@ -1,0 +1,123 @@
+---
+# SEDO daily check via Virtual token on Linux (Wine prefix)
+# No Windows worker, no WinRM — everything runs on the controller or a
+# dedicated Linux worker.
+#
+# Prerequisites (see docs/LINUX-WINE-DEPLOYMENT.md):
+#   - 32-bit Wine prefix at {{ wine_prefix }}
+#   - IIT DLLs + Key-6.dat in {{ sedo_libs }}
+#   - Registry keys set inside the prefix
+
+- name: SEDO daily check (Linux / Wine / virtual token)
+  hosts: sedo_workers_linux
+  gather_facts: false
+  vars_files:
+    - ../inventory/vault.yml
+
+  vars:
+    date_today: "{{ lookup('pipe', 'date +%Y-%m-%d') }}"
+    output_dir: "/opt/sedo-reports/{{ inventory_hostname }}/{{ date_today }}"
+    wine_prefix: "/opt/sedo-wine"
+    sedo_libs: "{{ wine_prefix }}/drive_c/sedo-libs"
+    virtual_module: "{{ sedo_libs }}/PKCS11.Virtual.EKeyAlmaz1C.dll"
+    key_file: "{{ sedo_libs }}/Key-6.dat"
+
+  tasks:
+    - name: Verify Wine prefix exists
+      ansible.builtin.stat:
+        path: "{{ wine_prefix }}/system.reg"
+      register: wine_check
+
+    - name: Stop if Wine prefix missing
+      ansible.builtin.fail:
+        msg: >-
+          Wine prefix not found at {{ wine_prefix }}.
+          Run `WINEARCH=win32 WINEPREFIX={{ wine_prefix }} wineboot --init`
+          and see docs/LINUX-WINE-DEPLOYMENT.md
+      when: not wine_check.stat.exists
+
+    - name: Verify virtual PKCS#11 module is in place
+      ansible.builtin.stat:
+        path: "{{ virtual_module }}"
+      register: module_check
+
+    - name: Stop if virtual module missing
+      ansible.builtin.fail:
+        msg: >-
+          PKCS11.Virtual.EKeyAlmaz1C.dll not found at {{ virtual_module }}.
+          See docs/MINIMUM-FILES-LIST.md scenario B.
+      when: not module_check.stat.exists
+
+    - name: Verify Key-6.dat is in place
+      ansible.builtin.stat:
+        path: "{{ key_file }}"
+      register: key_check
+
+    - name: Stop if Key-6.dat missing
+      ansible.builtin.fail:
+        msg: "Key-6.dat not found at {{ key_file }}"
+      when: not key_check.stat.exists
+
+    - name: Create output directory
+      ansible.builtin.file:
+        path: "{{ output_dir }}"
+        state: directory
+        mode: '0750'
+
+    - name: Run sedo-client with virtual backend
+      ansible.builtin.command:
+        cmd: >-
+          python3 /opt/sedo-client/sedo_client.py
+          --url "{{ sedo_url | default('https://sedo.mod.gov.ua') }}"
+          --backend virtual
+          --module "{{ virtual_module }}"
+          --key-file "{{ key_file }}"
+          --pin "{{ virtual_pins[inventory_hostname] }}"
+          --fetch
+          --since "{{ date_today }}"
+          --output "{{ output_dir }}"
+      environment:
+        WINEPREFIX: "{{ wine_prefix }}"
+      no_log: true
+      register: sedo_result
+      changed_when: sedo_result.rc == 0
+      failed_when: sedo_result.rc != 0
+
+    - name: Find downloaded documents
+      ansible.builtin.find:
+        paths: "{{ output_dir }}"
+        patterns: "*.zip"
+      register: downloaded
+
+- name: Verify downloaded signatures
+  hosts: localhost
+  gather_facts: false
+  vars:
+    date_today: "{{ lookup('pipe', 'date +%Y-%m-%d') }}"
+
+  tasks:
+    - name: Find all ZIPs for today
+      ansible.builtin.find:
+        paths: "/opt/sedo-reports"
+        patterns: "*.zip"
+        recurse: true
+      register: zip_files
+
+    - name: Run ua-sign-verify on each document
+      ansible.builtin.command:
+        cmd: >-
+          python3 /opt/ua-sign-verify/cli/main.py "{{ item.path }}"
+          --result-dir "/opt/sedo-reports/verified/{{ date_today }}"
+          --no-console
+      loop: "{{ zip_files.files }}"
+      register: verify_results
+      changed_when: false
+      failed_when: false
+
+    - name: Summary report
+      ansible.builtin.debug:
+        msg: |
+          Total:    {{ verify_results.results | length }}
+          Valid:    {{ verify_results.results | selectattr('rc', 'eq', 0) | list | length }}
+          Warnings: {{ verify_results.results | selectattr('rc', 'eq', 1) | list | length }}
+          Errors:   {{ verify_results.results | selectattr('rc', 'ne', 0) | selectattr('rc', 'ne', 1) | list | length }}

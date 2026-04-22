@@ -9,6 +9,37 @@ License:  BSD 3-Clause "New" or "Revised" License
 
 ## v0.26 — 2026-04-16
 
+### Додано
+
+- **Virtual backend** (`virtual_signer.py`): PKCS11.Virtual.EKeyAlmaz1C.dll +
+  Key-6.dat, працює без USB-токена (`--backend virtual --key-file Key-6.dat`)
+- **Linux/Wine deployment**: `docs/LINUX-WINE-DEPLOYMENT.md` — покроковий
+  cookbook для 32-bit Wine prefix, реєстрові ключі, виклик sedo-client
+- **Linux Ansible playbook** (`ansible/playbooks/sedo_daily_linux.yml`):
+  SEDO-перевірка без Windows worker і без WinRM
+- **Inventory group** `sedo_workers_linux` у `hosts.yml`
+- **Vault-змінна** `virtual_pins` у `vault.yml.example`
+- **`mechanism_ids.MECHANISM_SUPPORT`** — матриця HW/Virtual сумісності для
+  12 vendor mechanisms; функція `is_supported(mech_id, token_type)`
+- **7 нових юніт-тестів** у `tests/test_virtual_signer.py` (discovery +
+  mechanism matrix + CLI choices), всього 20 тестів
+
+### Документація (на основі ADDENDUM v1-v6)
+
+- `docs/IIT-ANALYSIS.md`: CSPExtension переосмислено як RNG self-test (BSI
+  AIS 31), а не "ECDH + GOST wrap"; ім'я `sCSPIBase` → `CSPIBase`;
+  статус `PKCS11.EKeyAlmaz1C.dll` оновлено на "отримано" (v1.0.1.7,
+  32+64-bit); розміри `KM.EKeyAlmaz1C.dll` скориговано; mutex-и
+  (`Global\EKAlmaz1CMutex`, `Global\EKAlmaz1CMemory`) задокументовано;
+  додано KM-архітектуру (KM.dll + KM_FileSystem + KM_PKCS11 + KM_EKeyAlmaz1C)
+- `docs/MINIMUM-FILES-LIST.md`: повний перепис — Scenario A (HW) vs
+  Scenario B (Virtual); додано `PKIFormats.dll`, `CSPIBase.dll`,
+  `EUSignCP.dll`, `KM.dll`, `KM_FileSystem.dll`; попередження про
+  version drift між v5 (2025) і v6 (2017-2023) батчами DLL
+- `docs/README.md`: посилання на всі 6 ADDENDUM-файлів
+- `SETUP-WINDOWS.md`: FAQ-секція "Crystal-1 vs Almaz-1K" — Crystal-1
+  не підтримується sedo-client (інший USB-driver, `VID:PID 03EB:9301`)
+
 ### Виправлено
 
 - `sedo_client.py`: прибрано мертву гілку `if sedo.authorize(...)` (метод лише raises)

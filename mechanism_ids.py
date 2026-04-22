@@ -40,6 +40,45 @@ IIT_MECHANISMS = {
     0x80420044: "DSTU4145_ECDH_B",            # derive (DSTU ECDH variant)
 }
 
+# Поведінкова матриця: що реально працює на HW Алмаз vs Virtual токені.
+# На HW токені 31 з 68 C_* функцій — stubs (повертають CKR_FUNCTION_NOT_SUPPORTED).
+# Virtual токен реалізує все 68. Джерело: ADDENDUM v1, v2.
+#
+# Ключ — mechanism ID, значення — (hw_ok, virtual_ok).
+# sedo-client використовує підпис (0x80420031/32), який працює скрізь.
+MECHANISM_SUPPORT = {
+    0x80420011: (False, True),   # SYM_ENC_A  — stub на HW
+    0x80420012: (False, True),   # SYM_ENC_B  — stub на HW
+    0x80420013: (False, True),   # SYM_ENC_C  — stub на HW
+    0x80420014: (True,  True),   # SYM_MAC
+    0x80420016: (True,  True),   # SYM_WRAP
+    0x80420021: (True,  True),   # HASH_KUPYNA
+    0x80420031: (True,  True),   # DSTU4145_SIGN_A  ← використовується sedo-client
+    0x80420032: (True,  True),   # DSTU4145_SIGN_B
+    0x80420041: (False, True),   # SYM_KEYGEN  — stub на HW
+    0x80420042: (False, True),   # DSTU4145_KEYPAIR_GEN  — stub на HW
+    0x80420043: (True,  True),   # DSTU4145_ECDH_A
+    0x80420044: (True,  True),   # DSTU4145_ECDH_B
+}
+
+
+def is_supported(mechanism_id: int, token_type: str = "hw") -> bool:
+    """
+    Чи підтримує указаний тип токена цей mechanism.
+
+    token_type: "hw" (Almaz-1K USB) або "virtual" (Key-6.dat).
+    Невідомі mechanism IDs вважаються непідтриманими.
+    """
+    support = MECHANISM_SUPPORT.get(mechanism_id)
+    if support is None:
+        return False
+    hw_ok, virtual_ok = support
+    if token_type == "hw":
+        return hw_ok
+    if token_type == "virtual":
+        return virtual_ok
+    raise ValueError(f"Unknown token_type: {token_type!r}")
+
 # ★ ГОЛОВНИЙ mechanism для підпису CMS/CAdES на Алмазі через IIT драйвер ★
 CKM_IIT_DSTU4145 = 0x80420031
 
