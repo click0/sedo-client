@@ -319,7 +319,7 @@ def main():
     try:
         with SEDOClient(sedo_url=args.url, backend=args.backend,
                         module_path=args.module,
-                        key_file=getattr(args, 'key_file', None)) as sedo:
+                        key_file=args.key_file) as sedo:
             sedo.authorize(args.pin)
             print("✓ Авторизація успішна")
 
