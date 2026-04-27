@@ -57,6 +57,29 @@ class TestMechanismSupport:
             is_supported(0x80420031, "bogus")
 
 
+class TestDetectDSTU4145:
+    def test_almaz_hw_module(self):
+        from mechanism_ids import detect_dstu4145_mechanism, CKM_IIT_DSTU4145
+        assert detect_dstu4145_mechanism(r"C:\libs\PKCS11.EKeyAlmaz1C.dll") == CKM_IIT_DSTU4145
+
+    def test_almaz_virtual_module(self):
+        """Virtual module name still contains 'ekeyalmaz1c' — same mechanism."""
+        from mechanism_ids import detect_dstu4145_mechanism, CKM_IIT_DSTU4145
+        assert detect_dstu4145_mechanism("PKCS11.Virtual.EKeyAlmaz1C.dll") == CKM_IIT_DSTU4145
+
+    def test_avest_module(self):
+        from mechanism_ids import detect_dstu4145_mechanism, CKM_DSTU4145
+        assert detect_dstu4145_mechanism("avcryptokinxt.dll") == CKM_DSTU4145
+
+    def test_efitkey_module(self):
+        from mechanism_ids import detect_dstu4145_mechanism, CKM_DSTU4145
+        assert detect_dstu4145_mechanism("efitkeynxt.dll") == CKM_DSTU4145
+
+    def test_unknown_module_defaults_to_iit(self):
+        from mechanism_ids import detect_dstu4145_mechanism, CKM_IIT_DSTU4145
+        assert detect_dstu4145_mechanism("random_pkcs11.dll") == CKM_IIT_DSTU4145
+
+
 class TestCLIBackendChoices:
     def test_backend_accepts_virtual(self):
         """argparse includes 'virtual' as a valid backend choice."""

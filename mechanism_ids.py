@@ -15,6 +15,12 @@ Year:     2025-2026
 #
 # Формат id: 0x8042XXXX. Префікс 0x80420000 = CKM_VENDOR_DEFINED + IIT tag.
 #
+__all__ = [
+    "IIT_MECHANISMS", "MECHANISM_SUPPORT", "CKM_IIT_DSTU4145",
+    "CKM_IIT_DSTU4145_ALT", "CKM_DSTU4145", "is_supported",
+    "detect_dstu4145_mechanism",
+]
+
 # 32 bytes  = 256-bit symmetric key (Kalyna/Kupyna/ГОСТ)
 # 163-509   = EC F_2M field sizes (DSTU 4145 curves GF(2^m))
 
@@ -108,8 +114,8 @@ def detect_dstu4145_mechanism(pkcs11_module_path: str) -> int:
     ТОВ Автор (avcryptoki*)  → 0x00000352
     """
     name = pkcs11_module_path.lower()
-    if 'ekeyalmaz1c' in name and 'virtual' not in name:
-        return CKM_IIT_DSTU4145         # 0x80420031
+    if 'ekeyalmaz1c' in name:
+        return CKM_IIT_DSTU4145         # 0x80420031  (HW and Virtual share the same IDs)
     if 'avcryptoki' in name or 'efitkey' in name:
         return CKM_DSTU4145              # 0x00000352
     return CKM_IIT_DSTU4145

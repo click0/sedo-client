@@ -62,7 +62,8 @@ def t_scardsvr():
     if sys.platform != "win32":
         return "skipped (not Windows)"
     import subprocess
-    r = subprocess.run(["sc", "query", "SCardSvr"], capture_output=True, text=True)
+    r = subprocess.run(["sc", "query", "SCardSvr"], capture_output=True, text=True,
+                        timeout=10)
     if "RUNNING" in r.stdout:
         return "RUNNING"
     raise AssertionError("SCardSvr not running")

@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "sedo-client"
+version = "0.26"
+description = "Automation of the Ukrainian Armed Forces EDMS (sedo.mod.gov.ua)"
+readme = "README.md"
+license = {text = "BSD-3-Clause"}
+requires-python = ">=3.11"
+authors = [
+    {name = "Vladyslav V. Prodan", email = "admin@support.od.ua"},
+]
+keywords = ["sedo", "ukraine", "pkcs11", "dstu4145", "almaz"]
+
+dependencies = [
+    "requests>=2.31",
+]
+
+[project.optional-dependencies]
+pkcs11 = ["PyKCS11>=1.5.15"]
+test = ["pytest>=7.4"]
+all = ["PyKCS11>=1.5.15", "pytest>=7.4"]
+
+[project.scripts]
+sedo-client = "sedo_client:main"
+
+[project.urls]
+Homepage = "https://github.com/click0/sedo-client"
+Documentation = "https://github.com/click0/sedo-client/tree/main/docs"
+Changelog = "https://github.com/click0/sedo-client/blob/main/CHANGELOG.md"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short"
+
+[tool.setuptools]
+py-modules = [
+    "sedo_client",
+    "iit_client",
+    "opensc_signer",
+    "pkcs11_signer",
+    "virtual_signer",
+    "mechanism_ids",
+]

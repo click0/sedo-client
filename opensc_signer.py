@@ -19,6 +19,8 @@ from typing import Optional
 
 log = logging.getLogger(__name__)
 
+__all__ = ["OpenSCSigner", "OpenSCNotFound"]
+
 
 class OpenSCNotFound(Exception):
     """pkcs11-tool.exe не знайдено."""

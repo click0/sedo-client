@@ -17,6 +17,12 @@ import requests
 
 log = logging.getLogger(__name__)
 
+__all__ = [
+    "IITClient", "IITError", "IITRPCError", "IITAgentNotFound",
+    "discover_agent", "read_port_from_registry", "read_trusted_sites",
+    "read_eusigncp_config",
+]
+
 
 # ═══════════════════════════════════════════════════════════════
 # Реєстр — знаходження порту агента

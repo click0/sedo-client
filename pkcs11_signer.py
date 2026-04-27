@@ -16,9 +16,12 @@ from typing import Optional
 
 log = logging.getLogger(__name__)
 
+__all__ = ["PKCS11Signer", "PKCS11NotAvailable", "check_almaz_mutex"]
+
 # Mutex-и які створює PKCS11.EKeyAlmaz1C.dll (ADDENDUM v1, v2).
 # HW та Virtual модулі тримають ті самі mutex-и — одночасний запуск конфліктує.
 ALMAZ_MUTEX_NAMES = [
+    "Global\\EKAlmaz1COpenMutex",
     "Global\\EKAlmaz1CMutex",
     "Global\\EKAlmaz1CMemory",
 ]
@@ -280,10 +283,14 @@ class PKCS11Signer:
 
     def logout(self) -> None:
         if self._session:
-            try: self._session.logout()
-            except Exception: pass
-            try: self._session.closeSession()
-            except Exception: pass
+            try:
+                self._session.logout()
+            except Exception as e:
+                log.debug("Session logout error (ignored): %s", e)
+            try:
+                self._session.closeSession()
+            except Exception as e:
+                log.debug("Session close error (ignored): %s", e)
             self._session = None
             self._priv_key = None
 

@@ -18,6 +18,8 @@ from typing import Optional
 
 log = logging.getLogger(__name__)
 
+__all__ = ["VirtualSigner", "VirtualTokenNotAvailable"]
+
 
 class VirtualTokenNotAvailable(Exception):
     """PyKCS11 or virtual PKCS#11 module not found."""
@@ -39,6 +41,8 @@ class VirtualSigner:
         r"C:\Program Files (x86)\Institute of Informational Technologies\EKeys\Almaz1C\PKCS11.Virtual.EKeyAlmaz1C.dll",
         r"C:\Program Files (x86)\Institute of Informational Technologies\Користувач ЦСК\PKCS11.Virtual.EKeyAlmaz1C.dll",
         r"C:\Program Files\Institute of Informational Technologies\PKCS11.Virtual.EKeyAlmaz1C.dll",
+        str(Path.home() / "AppData" / "Roaming" / "Institute of Informational Technologies"
+            / "EKeys" / "Almaz1C" / "PKCS11.Virtual.EKeyAlmaz1C.dll"),
         "./PKCS11.Virtual.EKeyAlmaz1C.dll",
         "./libs/PKCS11.Virtual.EKeyAlmaz1C.dll",
     ]
@@ -169,12 +173,12 @@ class VirtualSigner:
         if self._session:
             try:
                 self._session.logout()
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("Session logout error (ignored): %s", e)
             try:
                 self._session.closeSession()
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("Session close error (ignored): %s", e)
             self._session = None
             self._priv_key = None
 

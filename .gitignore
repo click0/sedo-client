@@ -21,6 +21,7 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+.mypy_cache/
 
 # Build artifacts
 build/
