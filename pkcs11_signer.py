@@ -71,19 +71,6 @@ CKM_STANDARD = {
     0x00001043: "CKM_ECDSA_SHA1",
 }
 
-# IIT vendor-defined mechanisms (не встановлено в PKCS#11 стандарт)
-# Виявляються runtime. Ці імена — евристичні назви що ми присвоюємо.
-# Справжні ID визначає C_GetMechanismList.
-MECH_NAME_HINTS = {
-    # IIT / UA-specific mechanism name hints (якщо ID >= 0x80000000)
-    "DSTU4145": ["dstu", "4145", "uac", "gf2m"],
-    "DSTU7564": ["7564", "kupyna", "hash"],
-    "DSTU7624": ["7624", "kalyna", "cipher"],
-    "GOST34311": ["34311", "gost hash"],
-    "GOST28147": ["28147", "gost cipher"],
-}
-
-
 class PKCS11Signer:
     """
     Прямий PKCS#11 клієнт через PKCS11_EKeyAlmaz1C.dll.

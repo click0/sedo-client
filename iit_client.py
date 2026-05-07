@@ -47,11 +47,8 @@ EUSIGNCP_REGISTRY_PATH = (
     r"\Certificate Authority-1.3\End User\Libraries\Sign"
 )
 
-# Дефолтні порти — підтверджено реальними значеннями з реєстру
-DEFAULT_HTTP_PORT = 8081
-DEFAULT_HTTPS_PORT = 8083
-
 # Fallback — якщо реєстр недоступний, спробувати звичайні порти
+# 8081/8083 — підтверджені порти з реєстру (HTTPPort/HTTPSPort)
 FALLBACK_PORTS = [8081, 8083, 9100, 9101, 8080, 8443, 9000, 9090]
 
 
@@ -353,6 +350,8 @@ class IITClient:
     def get_version(self) -> str:
         return self.call("GetVersion")
 
+    # ─── Інформаційні (CLI: iit_client.py --discover) ─────────
+
     def get_host_info(self) -> dict:
         """Інформація про робочу станцію (OS, архітектура тощо)."""
         return self.call("GetHostInfo")
@@ -367,7 +366,7 @@ class IITClient:
         return self.call("EnumKeyMediaDevices")
 
     def enum_key_media_types(self) -> list[dict]:
-        """Типи носіїв, які підтримує IIT."""
+        """Типи носіїв, які підтримує IIT. (CLI: --list-devices)"""
         return self.call("EnumKeyMediaTypes")
 
     def read_private_key(self, device: dict, pin: str) -> None:
@@ -382,10 +381,11 @@ class IITClient:
         self.call("ReadPrivateKey", [device, pin])
 
     def is_private_key_read(self) -> bool:
+        """Перевірка чи ключ завантажений. (CLI: діагностика)"""
         return bool(self.call("IsPrivateKeyReaded"))
 
     def reset_private_key(self) -> None:
-        """Забути приватний ключ (logout)."""
+        """Забути приватний ключ (logout). Викликається з finalize()."""
         self.call("ResetPrivateKey")
 
     # ─── Сертифікати ─────────────────────────────────────────
@@ -417,7 +417,7 @@ class IITClient:
         return base64.b64decode(result) if isinstance(result, str) else result
 
     def sign_hash(self, hash_value: bytes) -> bytes:
-        """Raw підпис хешу (для challenge-response де вже є хеш)."""
+        """Raw підпис хешу. (CLI/API: challenge-response де вже є хеш)"""
         import base64
         h_b64 = base64.b64encode(hash_value).decode()
         result = self.call("SignHash", [h_b64])

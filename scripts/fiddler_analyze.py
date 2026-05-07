@@ -13,7 +13,6 @@ import sys
 import zipfile
 import re
 from pathlib import Path
-from xml.etree import ElementTree as ET
 
 
 def parse_saz(saz_path: Path) -> list[dict]:

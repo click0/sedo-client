@@ -109,6 +109,7 @@ class OpenSCSigner:
         return r.stdout.decode("utf-8", errors="replace").splitlines()
 
     def show_info(self) -> str:
+        """Module and token info. (CLI: opensc_signer.py --list-slots)"""
         r = self._run(["--show-info"])
         return r.stdout.decode("utf-8", errors="replace")
 
