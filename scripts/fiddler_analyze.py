@@ -20,17 +20,23 @@ def parse_saz(saz_path: Path) -> list[dict]:
     """Парсить SAZ файл (ZIP с sessions всередині)."""
     sessions = []
     with zipfile.ZipFile(saz_path) as zf:
-        # Знаходимо session файли: raw/XXX_c.txt (request), raw/XXX_s.txt (response), raw/XXX_m.xml (metadata)
-        session_nums = set()
+        # Session files: raw/<N>_c.txt (request), raw/<N>_s.txt (response)
+        # N can be any number of digits (Fiddler does not always zero-pad).
+        req_files = {}
+        resp_files = {}
         for name in zf.namelist():
-            m = re.match(r'raw/(\d+)_[cms]\.', name)
+            m = re.match(r'raw/(\d+)_c\.txt$', name)
             if m:
-                session_nums.add(int(m.group(1)))
+                req_files[int(m.group(1))] = name
+                continue
+            m = re.match(r'raw/(\d+)_s\.txt$', name)
+            if m:
+                resp_files[int(m.group(1))] = name
 
-        for num in sorted(session_nums):
+        for num in sorted(req_files.keys() & resp_files.keys()):
             try:
-                req = zf.read(f"raw/{num:04d}_c.txt").decode("utf-8", errors="replace")
-                resp = zf.read(f"raw/{num:04d}_s.txt").decode("utf-8", errors="replace")
+                req = zf.read(req_files[num]).decode("utf-8", errors="replace")
+                resp = zf.read(resp_files[num]).decode("utf-8", errors="replace")
                 sessions.append({"num": num, "request": req, "response": resp})
             except KeyError:
                 continue

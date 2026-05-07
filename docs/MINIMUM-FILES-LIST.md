@@ -92,6 +92,15 @@ libs/
 └── Key-6.dat                        # Virtual only, private key
 ```
 
+## Bitness: do not mix 32-bit and 64-bit
+
+All IIT DLLs in a deployment **must be the same bitness** (all 32-bit or all
+64-bit). Mixing causes `LoadLibrary` / `GetProcAddress` failures.
+
+- HW module: 32-bit = ~356 KB, 64-bit = ~418 KB
+- `pkcs11-tool` must also match the DLL bitness (32-bit OpenSC for 32-bit DLLs)
+- Wine deployments: **always use 32-bit** (`WINEARCH=win32`)
+
 ## Not required
 
 Despite older guides, these are **NOT needed** for sedo-client PKCS#11 operation:

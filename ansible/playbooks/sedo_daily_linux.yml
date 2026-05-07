@@ -10,12 +10,12 @@
 
 - name: SEDO daily check (Linux / Wine / virtual token)
   hosts: sedo_workers_linux
-  gather_facts: false
+  gather_facts: true
   vars_files:
     - ../inventory/vault.yml
 
   vars:
-    date_today: "{{ lookup('pipe', 'date +%Y-%m-%d') }}"
+    date_today: "{{ ansible_date_time.date }}"
     output_dir: "/opt/sedo-reports/{{ inventory_hostname }}/{{ date_today }}"
     wine_prefix: "/opt/sedo-wine"
     sedo_libs: "{{ wine_prefix }}/drive_c/sedo-libs"
@@ -91,9 +91,9 @@
 
 - name: Verify downloaded signatures
   hosts: localhost
-  gather_facts: false
+  gather_facts: true
   vars:
-    date_today: "{{ lookup('pipe', 'date +%Y-%m-%d') }}"
+    date_today: "{{ ansible_date_time.date }}"
 
   tasks:
     - name: Find all ZIPs for today

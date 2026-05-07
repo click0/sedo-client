@@ -4,12 +4,12 @@
 
 - name: СЕДО ЗСУ — щоденна перевірка
   hosts: sedo_workers
-  gather_facts: false
+  gather_facts: true
   vars_files:
     - ../inventory/vault.yml
 
   vars:
-    date_today: "{{ lookup('pipe', 'date +%Y-%m-%d') }}"
+    date_today: "{{ ansible_date_time.date }}"
     output_dir: "{{ client_path }}\\downloads\\{{ date_today }}"
     pkcs11_module: "{{ client_path }}\\libs\\PKCS11_EKeyAlmaz1C.dll"
 
@@ -80,9 +80,9 @@
 
 - name: Верифікація на Linux controller
   hosts: localhost
-  gather_facts: false
+  gather_facts: true
   vars:
-    date_today: "{{ lookup('pipe', 'date +%Y-%m-%d') }}"
+    date_today: "{{ ansible_date_time.date }}"
 
   tasks:
     - name: Знайти завантажені ZIP

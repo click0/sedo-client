@@ -90,8 +90,11 @@ class OpenSCSigner:
         """Виклик pkcs11-tool із прапором --module."""
         cmd = [self._tool, "--module", self._module, *args]
         log.debug("$ %s", " ".join(cmd))
-        return subprocess.run(cmd, input=input_data, capture_output=True,
-                              timeout=timeout, check=False)
+        result = subprocess.run(cmd, input=input_data, capture_output=True,
+                                timeout=timeout, check=False)
+        if result.stderr:
+            log.debug("stderr: %s", result.stderr.decode("utf-8", errors="replace").rstrip())
+        return result
 
     # ─── Інформаційні (без PIN) ─────────────────────────────
 

@@ -57,6 +57,16 @@ jobs:
           git archive --format=zip --prefix="sedo-client-${VERSION}/" \
             -o "sedo-client-${VERSION}.zip" HEAD
 
+      - name: Generate SHA256 checksums
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          sha256sum \
+            "sedo-client-${VERSION}.tar.gz" \
+            "sedo-client-${VERSION}.zip" \
+            > "sedo-client-${VERSION}.sha256sums.txt"
+          echo "--- checksums ---"
+          cat "sedo-client-${VERSION}.sha256sums.txt"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -67,3 +77,4 @@ jobs:
           files: |
             sedo-client-${{ steps.version.outputs.version }}.tar.gz
             sedo-client-${{ steps.version.outputs.version }}.zip
+            sedo-client-${{ steps.version.outputs.version }}.sha256sums.txt
