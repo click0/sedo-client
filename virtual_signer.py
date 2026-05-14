@@ -187,3 +187,4 @@ class VirtualSigner:
 
     def __exit__(self, *args):
         self.logout()
+        return False

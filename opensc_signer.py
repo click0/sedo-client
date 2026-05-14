@@ -89,7 +89,9 @@ class OpenSCSigner:
              timeout: float = 30.0) -> subprocess.CompletedProcess:
         """Виклик pkcs11-tool із прапором --module."""
         cmd = [self._tool, "--module", self._module, *args]
-        log.debug("$ %s", " ".join(cmd))
+        safe_cmd = [("***" if i > 0 and cmd[i - 1] == "--pin" else a)
+                    for i, a in enumerate(cmd)]
+        log.debug("$ %s", " ".join(safe_cmd))
         result = subprocess.run(cmd, input=input_data, capture_output=True,
                                 timeout=timeout, check=False)
         if result.stderr:
@@ -193,6 +195,7 @@ class OpenSCSigner:
 
     def __exit__(self, *args):
         self.logout()
+        return False
 
 
 # ═══════════════════════════════════════════════════════════════
