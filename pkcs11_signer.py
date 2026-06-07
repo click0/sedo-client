@@ -234,15 +234,11 @@ class PKCS11Signer:
             raise RuntimeError("No private keys on token")
         self._priv_key = keys[0]
 
-        # Auto-discover sign mechanism якщо не задано
         if self._sign_mechanism is None:
-            try:
-                self._sign_mechanism = self.find_sign_mechanism()
-            except Exception as e:
-                log.warning("Could not auto-discover mechanism: %s", e)
+            self._sign_mechanism = self.find_sign_mechanism()
 
-        log.info("Logged in, private key ready, mechanism=%s",
-                 f"0x{self._sign_mechanism:08X}" if self._sign_mechanism else "?")
+        log.info("Logged in, private key ready, mechanism=0x%08X",
+                 self._sign_mechanism)
 
     def get_certificate(self) -> bytes:
         if not self._session:
