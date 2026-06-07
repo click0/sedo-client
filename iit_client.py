@@ -414,14 +414,28 @@ class IITClient:
         data_b64 = base64.b64encode(data).decode()
         opts = options or {"internal": True}  # detached = False
         result = self.call("SignData", [data_b64, opts])
-        return base64.b64decode(result) if isinstance(result, str) else result
+        if isinstance(result, str):
+            try:
+                return base64.b64decode(result)
+            except Exception as e:
+                raise IITRPCError(-1, f"SignData returned invalid base64: {e}") from e
+        if result is None:
+            raise IITRPCError(-1, "SignData returned empty result")
+        return result
 
     def sign_hash(self, hash_value: bytes) -> bytes:
         """Raw підпис хешу. (CLI/API: challenge-response де вже є хеш)"""
         import base64
         h_b64 = base64.b64encode(hash_value).decode()
         result = self.call("SignHash", [h_b64])
-        return base64.b64decode(result) if isinstance(result, str) else result
+        if isinstance(result, str):
+            try:
+                return base64.b64decode(result)
+            except Exception as e:
+                raise IITRPCError(-1, f"SignHash returned invalid base64: {e}") from e
+        if result is None:
+            raise IITRPCError(-1, "SignHash returned empty result")
+        return result
 
     # ─── Контекстний менеджер ────────────────────────────────
 

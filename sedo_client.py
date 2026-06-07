@@ -95,6 +95,11 @@ class SEDOClient:
             try:
                 from virtual_signer import VirtualSigner
                 resolved_key = key_file or self._find_key_file()
+                if name == "virtual" and not resolved_key:
+                    raise FileNotFoundError(
+                        "Virtual backend requires --key-file or Key-6.dat "
+                        "in a standard location"
+                    )
                 signer = VirtualSigner(module_path=module_path,
                                        key_file=resolved_key)
                 log.info("Backend: Virtual token (Key-6.dat, no USB)")
@@ -153,7 +158,8 @@ class SEDOClient:
                 if flow_fn(cert, pin):
                     log.info("✓ Authorized via %s", flow_name)
                     return True
-            except Exception as e:
+            except (requests.RequestException, ValueError, RuntimeError,
+                    NotImplementedError) as e:
                 log.debug("%s flow failed: %s", flow_name, e)
 
         raise RuntimeError(
@@ -188,13 +194,13 @@ class SEDOClient:
                     continue
                 data = r.json()
                 challenge = data.get("challenge") or data.get("nonce") or data.get("data")
-                if not challenge:
+                if not challenge or not isinstance(challenge, (str, bytes)):
                     continue
 
                 log.info("Got challenge (%d chars)", len(challenge))
                 challenge_bytes = (
                     base64.b64decode(challenge) if isinstance(challenge, str)
-                    else bytes(challenge)
+                    else challenge
                 )
 
                 signature = self.signer.sign(challenge_bytes)
@@ -329,7 +335,12 @@ def main():
                 docs = sedo.fetch_inbox(since=args.since)
                 print(f"📄 Документів: {len(docs)}")
                 for doc in docs:
-                    path = sedo.download_document(doc["id"], output_dir)
+                    doc_id = doc.get("id")
+                    if not doc_id:
+                        log.warning("Document without id, skipping: %s",
+                                    doc.get("title", doc))
+                        continue
+                    path = sedo.download_document(doc_id, output_dir)
                     print(f"  ✓ {path.name}")
     except Exception as e:
         log.error("❌ %s", e)
