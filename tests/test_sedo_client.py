@@ -174,10 +174,10 @@ class TestIITAgentAdapter:
 # ─── Context manager ────────────────────────────────────────
 
 class TestSEDOClientContextManager:
-    @patch("sedo_client.SEDOClient._pick_backend", return_value=FakeSigner())
-    def test_exit_calls_logout(self, _):
+    def test_exit_calls_logout(self):
         signer = FakeSigner()
+        signer.logged_in = True
         with patch("sedo_client.SEDOClient._pick_backend", return_value=signer):
             with SEDOClient() as client:
-                pass
-        assert not signer.logged_in or True  # logout was called
+                assert client.signer is signer
+        assert not signer.logged_in

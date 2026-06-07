@@ -282,7 +282,9 @@ class PKCS11Signer:
             self._priv_key = None
 
     def __enter__(self): return self
-    def __exit__(self, *args): self.logout()
+    def __exit__(self, *args):
+        self.logout()
+        return False
 
 
 # ═══════════════════════════════════════════════════════════════
