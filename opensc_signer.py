@@ -202,6 +202,12 @@ class OpenSCSigner:
 
 def main():
     import argparse
+    import sys
+    for _s in (sys.stdout, sys.stderr):
+        try:
+            _s.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     parser = argparse.ArgumentParser(description="OpenSC pkcs11-tool wrapper")
     parser.add_argument("--module", required=True, help="PKCS11_EKeyAlmaz1C.dll")
     parser.add_argument("--mechanism", default="0x80420031")
