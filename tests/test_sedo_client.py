@@ -6,6 +6,7 @@ All tests run without a real token or network — backends and HTTP are mocked.
 
 import base64
 import os
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -181,3 +182,33 @@ class TestSEDOClientContextManager:
             with SEDOClient() as client:
                 assert client.signer is signer
         assert not signer.logged_in
+
+
+# ─── Windows console encoding ───────────────────────────────
+
+class TestForceUtf8IO:
+    def test_emoji_print_survives_cp1251(self, monkeypatch):
+        """force_utf8_io makes emoji printable on a cp1251 console."""
+        import io
+        from sedo_client import force_utf8_io
+
+        fake_out = io.TextIOWrapper(io.BytesIO(), encoding="cp1251")
+        fake_err = io.TextIOWrapper(io.BytesIO(), encoding="cp1251")
+        monkeypatch.setattr("sys.stdout", fake_out)
+        monkeypatch.setattr("sys.stderr", fake_err)
+
+        force_utf8_io()
+        # Would raise UnicodeEncodeError on raw cp1251 without the fix
+        print("✓ Авторизація успішна 📄")
+        sys.stdout.flush()
+
+    def test_no_crash_on_non_reconfigurable_stream(self, monkeypatch):
+        """Streams without reconfigure() are skipped silently."""
+        from sedo_client import force_utf8_io
+
+        class Dummy:
+            pass
+
+        monkeypatch.setattr("sys.stdout", Dummy())
+        monkeypatch.setattr("sys.stderr", Dummy())
+        force_utf8_io()  # must not raise

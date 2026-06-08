@@ -316,6 +316,11 @@ class PKCS11Signer:
 
 def main():
     import argparse, sys
+    for _s in (sys.stdout, sys.stderr):
+        try:
+            _s.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
 
     parser = argparse.ArgumentParser(
         description="PKCS#11 signer — для тестування PKCS11_EKeyAlmaz1C.dll"

@@ -12,6 +12,7 @@ Year:     2025-2026
 import base64
 import logging
 import os
+import sys
 from pathlib import Path
 from typing import Optional, Protocol
 
@@ -19,7 +20,24 @@ import requests
 
 log = logging.getLogger(__name__)
 
-__all__ = ["SEDOClient", "Signer", "SEDO_MOD_URL", "IITAgentAdapter"]
+
+def force_utf8_io() -> None:
+    """
+    Ensure stdout/stderr can print emoji and Cyrillic on Windows consoles.
+
+    Ukrainian Windows uses cp866/cp1251 by default, where printing characters
+    like ✓ 📄 ❌ raises UnicodeEncodeError and crashes the program. Reconfigure
+    the streams to UTF-8 with replacement so output never crashes.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
+
+__all__ = ["SEDOClient", "Signer", "SEDO_MOD_URL", "IITAgentAdapter",
+           "force_utf8_io"]
 
 # Standard locations for Key-6.dat (virtual token auto-detect)
 KEY_FILE_SEARCH_PATHS = [
@@ -293,7 +311,8 @@ class IITAgentAdapter:
 
 def main():
     import argparse
-    import sys
+
+    force_utf8_io()
 
     parser = argparse.ArgumentParser(description="SEDO ЗСУ automation")
     parser.add_argument("--url", default=SEDO_MOD_URL,

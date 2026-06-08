@@ -9,6 +9,14 @@ License:  BSD 3-Clause "New" or "Revised" License
 
 ## Unreleased
 
+### Виправлено (Windows)
+
+- **Краш на українській Windows-консолі**: `print("✓ ...")` падав із
+  `UnicodeEncodeError` (cp1251/cp866 не має emoji ✓ 📄 ❌) одразу після
+  успішної авторизації. Додано `force_utf8_io()` — переключає stdout/stderr
+  на UTF-8 на старті всіх 4 CLI (sedo_client, iit_client, opensc_signer,
+  pkcs11_signer). +2 регресійні тести.
+
 ### CI / збірка
 
 - **Standalone бінарники** через PyInstaller у 3 нових воркфлоу:
