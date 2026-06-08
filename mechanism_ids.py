@@ -18,7 +18,8 @@ Year:     2025-2026
 __all__ = [
     "IIT_MECHANISMS", "MECHANISM_SUPPORT", "CKM_IIT_DSTU4145",
     "CKM_IIT_DSTU4145_ALT", "CKM_DSTU4145", "is_supported",
-    "detect_dstu4145_mechanism",
+    "detect_dstu4145_mechanism", "DSTU4145_SIGN_MECHANISMS",
+    "pick_sign_mechanism", "detect_token_vendor",
 ]
 
 # 32 bytes  = 256-bit symmetric key (Kalyna/Kupyna/ГОСТ)
@@ -106,16 +107,58 @@ CKM_DSTU7564_HMAC_384      = 0x00000357
 CKM_DSTU7564_HMAC_512      = 0x00000358
 
 
+# ═══════════════════════════════════════════════════════════════
+# Усі відомі DSTU 4145 sign mechanism IDs, у порядку пріоритету.
+# Покриває IIT (Алмаз HW/Virtual) і Avest (CC-337 / ST-338, EfitKey).
+# ═══════════════════════════════════════════════════════════════
+
+DSTU4145_SIGN_MECHANISMS = (
+    CKM_IIT_DSTU4145,        # 0x80420031  IIT Алмаз — головний
+    CKM_IIT_DSTU4145_ALT,    # 0x80420032  IIT Алмаз — альтернатива
+    CKM_DSTU4145,            # 0x00000352  стандарт PKCS#11 — Avest, ТОВ Автор
+)
+
+
+def detect_token_vendor(pkcs11_module_path: str) -> str:
+    """
+    Визначити вендора токена за ім'ям PKCS#11 модуля.
+
+    Повертає одне з: "iit", "iit_virtual", "avest", "unknown".
+    """
+    name = pkcs11_module_path.lower()
+    if 'virtual' in name and 'ekeyalmaz1c' in name:
+        return "iit_virtual"
+    if 'ekeyalmaz1c' in name or 'ekeycrystal' in name:
+        return "iit"
+    if ('avcryptoki' in name or 'efitkey' in name
+            or 'av337' in name or 'cc33' in name):
+        return "avest"
+    return "unknown"
+
+
 def detect_dstu4145_mechanism(pkcs11_module_path: str) -> int:
     """
     Визначити mechanism ID за ім'ям модуля.
 
-    IIT (Алмаз, EKeyAlmaz1C) → 0x80420031
-    ТОВ Автор (avcryptoki*)  → 0x00000352
+    IIT (Алмаз, EKeyAlmaz1C)         → 0x80420031
+    Avest (avcryptoki / Av337 / CC-33x) → 0x00000352
     """
-    name = pkcs11_module_path.lower()
-    if 'ekeyalmaz1c' in name:
-        return CKM_IIT_DSTU4145         # 0x80420031  (HW and Virtual share the same IDs)
-    if 'avcryptoki' in name or 'efitkey' in name:
+    vendor = detect_token_vendor(pkcs11_module_path)
+    if vendor == "avest":
         return CKM_DSTU4145              # 0x00000352
-    return CKM_IIT_DSTU4145
+    return CKM_IIT_DSTU4145              # 0x80420031 (IIT HW/Virtual)
+
+
+def pick_sign_mechanism(available_ids) -> "int | None":
+    """
+    Вибрати найкращий DSTU 4145 sign mechanism зі списку доступних на токені.
+
+    available_ids — iterable числових mechanism IDs (з C_GetMechanismList).
+    Повертає перший збіг із DSTU4145_SIGN_MECHANISMS, або None якщо жодного
+    відомого DSTU 4145 механізму немає (тоді викликач вирішує сам).
+    """
+    available = set(int(m) for m in available_ids)
+    for mech in DSTU4145_SIGN_MECHANISMS:
+        if mech in available:
+            return mech
+    return None
