@@ -9,6 +9,17 @@ License:  BSD 3-Clause "New" or "Revised" License
 
 ## Unreleased
 
+### CI / збірка
+
+- **Standalone бінарники** через PyInstaller у 3 нових воркфлоу:
+  - `.github/workflows/build-windows.yml` — `.exe` (windows-latest)
+  - `.github/workflows/build-unix.yml` — Linux ELF (ubuntu) +
+    FreeBSD ELF (vmactions/freebsd-vm)
+  - `scripts/build_binary.py` — крос-платформний build helper з коректним
+    bundling lazy-import backends і опціонального PyKCS11
+- Бінарники тригеряться на тег `v*` і прикріплюються до GitHub Release;
+  також доступні через workflow_dispatch як артефакти
+
 ### Додано
 
 - **Підтримка токенів Avest CC-337 / SecureToken-338** (`Av337CryptokiD.dll`)
