@@ -73,19 +73,34 @@ CKM_STANDARD = {
 
 class PKCS11Signer:
     """
-    Прямий PKCS#11 клієнт через PKCS11_EKeyAlmaz1C.dll.
+    Прямий PKCS#11 клієнт для DSTU 4145 токенів.
 
-    Mechanism ID для підпису auto-discovered при першому виклику.
+    Підтримує:
+    - IIT Алмаз-1К (PKCS11.EKeyAlmaz1C.dll), mechanism 0x80420031
+    - Avest CC-337 / SecureToken-338 (Av337CryptokiD.dll), mechanism 0x00000352
+    - Avest AvestKey / EfitKey (avcryptokinxt.dll)
+
+    Mechanism ID для підпису auto-discovered при першому виклику login().
     """
 
     DEFAULT_MODULE_PATHS = [
-        # Підтверджений інсталером IIT шлях — див. README.md / opensc-test-almaz.ps1
+        # ─ IIT Алмаз-1К (підтверджений інсталером шлях) ─
         r"C:\Program Files (x86)\Institute of Informational Technologies\EKeys\Almaz1C\PKCS11.EKeyAlmaz1C.dll",
         r"C:\Program Files (x86)\Institute of Informational Technologies\ЄвроЗнак\PKCS11_EKeyAlmaz1C.dll",
         r"C:\Program Files (x86)\Institute of Informational Technologies\Користувач ЦСК\PKCS11_EKeyAlmaz1C.dll",
         r"C:\Program Files\Institute of Informational Technologies\PKCS11_EKeyAlmaz1C.dll",
+        # ─ Avest CC-337 / SecureToken-338 (Av337CryptokiD.dll) ─
+        r"C:\Program Files (x86)\Avest\AvestKey\Av337CryptokiD.dll",
+        r"C:\Program Files (x86)\Avest\Av337CryptokiD.dll",
+        r"C:\Windows\SysWOW64\Av337CryptokiD.dll",
+        # ─ Avest AvestKey / EfitKey / AvPassG (avcryptokinxt.dll) ─
+        r"C:\Program Files (x86)\Avest\AvestKey\avcryptokinxt.dll",
+        r"C:\Windows\SysWOW64\avcryptokinxt.dll",
+        # ─ локальні ─
         "./PKCS11_EKeyAlmaz1C.dll",
         "./libs/PKCS11_EKeyAlmaz1C.dll",
+        "./Av337CryptokiD.dll",
+        "./libs/Av337CryptokiD.dll",
     ]
 
     def __init__(self, module_path: Optional[str] = None):
@@ -122,8 +137,9 @@ class PKCS11Signer:
             if Path(path).exists():
                 return path
         raise FileNotFoundError(
-            f"PKCS11_EKeyAlmaz1C.dll не знайдено. "
-            f"Перевір: {cls.DEFAULT_MODULE_PATHS}"
+            f"PKCS#11 module not found (IIT PKCS11.EKeyAlmaz1C.dll or "
+            f"Avest Av337CryptokiD.dll). Pass --module explicitly or place "
+            f"the DLL in one of: {cls.DEFAULT_MODULE_PATHS}"
         )
 
     # ─── Discovery ───────────────────────────────────────────
@@ -179,11 +195,17 @@ class PKCS11Signer:
     def find_sign_mechanism(self, prefer_dstu: bool = True) -> int:
         """
         Знаходить правильний mechanism ID для підпису.
-        Евристика: шукаємо перший mechanism з CKF_SIGN flag.
-        Якщо prefer_dstu=True, пріоритет на vendor-defined (>= 0x80000000).
+
+        Порядок:
+        1. Відомий DSTU 4145 ID з реєстру (IIT 0x80420031/32 або
+           Avest/стандарт 0x00000352) — найнадійніше для обох вендорів.
+        2. Будь-який vendor-defined (>= 0x80000000) — для нових IIT-токенів.
+        3. Перший mechanism з CKF_SIGN — останній fallback.
 
         Повертає numeric mechanism ID.
         """
+        from mechanism_ids import pick_sign_mechanism
+
         mechanisms = self.list_mechanisms()
         signing = [m for m in mechanisms if m["can_sign"]]
         if not signing:
@@ -193,16 +215,21 @@ class PKCS11Signer:
         for m in signing:
             log.info("  %s  min=%d max=%d", m["hex"], m["min_key"], m["max_key"])
 
-        # Фільтр: DSTU/vendor mechanisms мають ID >= 0x80000000
-        # Для Алмаза — майже напевно DSTU 4145
         if prefer_dstu:
+            # 1. Відомий DSTU 4145 ID (працює і для IIT, і для Avest ST-338)
+            known = pick_sign_mechanism(m["id"] for m in signing)
+            if known is not None:
+                log.info("Selected known DSTU 4145 mechanism: 0x%08X", known)
+                return known
+
+            # 2. Будь-який vendor-defined
             vendor = [m for m in signing if m["id"] >= 0x80000000]
             if vendor:
                 mech = vendor[0]
                 log.info("Selected vendor mechanism: %s", mech["hex"])
                 return mech["id"]
 
-        # Fallback — перший що вміє sign
+        # 3. Fallback — перший що вміє sign
         mech = signing[0]
         log.info("Selected mechanism: %s", mech["hex"])
         return mech["id"]

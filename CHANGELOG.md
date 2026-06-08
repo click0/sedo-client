@@ -7,6 +7,33 @@ Contact:  github.com/click0
 License:  BSD 3-Clause "New" or "Revised" License
 ```
 
+## Unreleased
+
+### CI / збірка
+
+- **Standalone бінарники** через PyInstaller у 3 нових воркфлоу:
+  - `.github/workflows/build-windows.yml` — `.exe` (windows-latest)
+  - `.github/workflows/build-unix.yml` — Linux ELF (ubuntu) +
+    FreeBSD ELF (vmactions/freebsd-vm)
+  - `scripts/build_binary.py` — крос-платформний build helper з коректним
+    bundling lazy-import backends і опціонального PyKCS11
+- Бінарники тригеряться на тег `v*` і прикріплюються до GitHub Release;
+  також доступні через workflow_dispatch як артефакти
+
+### Додано
+
+- **Підтримка токенів Avest CC-337 / SecureToken-338** (`Av337CryptokiD.dll`)
+  та Avest AvestKey / EfitKey (`avcryptokinxt.dll`) у backend `pkcs11`
+- `mechanism_ids.detect_token_vendor()` — визначення вендора за ім'ям модуля
+  ("iit" / "iit_virtual" / "avest" / "unknown")
+- `mechanism_ids.pick_sign_mechanism()` — вибір DSTU 4145 sign-механізму зі
+  списку доступних, з реєстром `DSTU4145_SIGN_MECHANISMS`
+- `find_sign_mechanism()` тепер пріоритезує відомі DSTU 4145 ID (IIT
+  0x80420031/32 і Avest стандартний 0x00000352) перед загальною евристикою —
+  виправляє вибір механізму для Avest ST-338 (стандартний ID < 0x80000000)
+- Avest-шляхи додано до `PKCS11Signer.DEFAULT_MODULE_PATHS`
+- 15 нових юніт-тестів (`tests/test_avest.py`)
+
 ## v0.27 — 2026-06-08
 
 ### Тести та якість

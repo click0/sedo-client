@@ -53,13 +53,30 @@ Windows worker
         Almaz-1K USB
 ```
 
-Три backend-и на вибір:
+Backend-и на вибір:
 
 | Backend | Переваги | Залежність |
 |---|---|---|
 | **`opensc`** | Найпростіший, входить до OpenSC | Тільки 32-bit OpenSC |
 | `pkcs11`    | Швидший, Python-native           | OpenSC + PyKCS11 |
+| `virtual`   | Без USB-токена (софт-ключ)       | PyKCS11 + Key-6.dat |
 | `iit_agent` | Не потрібен OpenSC               | IIT "Користувач ЦСК" GUI запущено |
+
+### Підтримувані токени
+
+| Токен | PKCS#11 модуль | DSTU 4145 mechanism |
+|---|---|---|
+| IIT Алмаз-1К (HW) | `PKCS11.EKeyAlmaz1C.dll` | `0x80420031` |
+| IIT Алмаз-1К (virtual) | `PKCS11.Virtual.EKeyAlmaz1C.dll` | `0x80420031` |
+| Avest CC-337 / SecureToken-338 | `Av337CryptokiD.dll` | `0x00000352` |
+| Avest AvestKey / EfitKey | `avcryptokinxt.dll` | `0x00000352` |
+
+Backend `pkcs11` авто-визначає правильний DSTU 4145 mechanism для кожного
+вендора. Передай `--module` з потрібним DLL, напр. для ST-338:
+
+```
+python sedo_client.py --backend pkcs11 --module "C:\...\Av337CryptokiD.dll" --pin XXXX
+```
 
 ## Швидкий старт
 

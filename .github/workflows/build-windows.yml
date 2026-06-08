@@ -1,0 +1,66 @@
+name: Build Windows binary
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests pyinstaller
+          pip install PyKCS11
+
+      - name: Run tests
+        run: |
+          pip install pytest
+          python -m pytest tests/ -q
+
+      - name: Build binary
+        run: python scripts/build_binary.py
+
+      - name: Smoke test
+        run: dist\sedo-client.exe --help
+
+      - name: Determine version
+        id: ver
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=dev-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Rename binary
+        shell: bash
+        run: |
+          mv dist/sedo-client.exe \
+             "dist/sedo-client-${{ steps.ver.outputs.version }}-windows-x64.exe"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sedo-client-windows-x64
+          path: dist/sedo-client-*-windows-x64.exe
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/sedo-client-*-windows-x64.exe
