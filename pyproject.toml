@@ -4,7 +4,7 @@ build-backend = "setuptools.backends._legacy:_Backend"
 
 [project]
 name = "sedo-client"
-version = "0.26"
+version = "0.27"
 description = "Automation of the Ukrainian Armed Forces EDMS (sedo.mod.gov.ua)"
 readme = "README.md"
 license = {text = "BSD-3-Clause"}

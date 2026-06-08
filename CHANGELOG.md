@@ -7,6 +7,55 @@ Contact:  github.com/click0
 License:  BSD 3-Clause "New" or "Revised" License
 ```
 
+## v0.27 — 2026-06-08
+
+### Тести та якість
+
+- 56 юніт-тестів (було 13): `test_sedo_client.py` (17), `test_opensc_signer.py` (14),
+  `test_virtual_signer.py` (12), `test_iit_client.py` (13)
+- `pyproject.toml` — pip-installable: `pip install .` або `pip install .[all]`
+- `__all__` у всіх 6 Python-модулях — визначена публічна API-поверхня
+
+### Виправлено (runtime bugs)
+
+- `iit_client.py`: `sign_data`/`sign_hash` — захист `base64.b64decode` від
+  малформованих відповідей агента; перевірка None-результату
+- `sedo_client.py`: `--backend virtual` без Key-6.dat тепер raises
+  `FileNotFoundError` (було: мовчки None → cryptic crash при login)
+- `sedo_client.py`: challenge type guard у `_flow_direct_kep` — тепер
+  приймає лише `str`/`bytes`, не list/dict
+- `sedo_client.py`: `doc.get("id")` замість `doc["id"]` у fetch loop
+  (було: KeyError якщо API повертає документ без id)
+- `sedo_client.py`: `authorize()` exception catch звужено до конкретних
+  типів (було: `except Exception` ковтало KeyboardInterrupt)
+- `pkcs11_signer.py`: mechanism discovery failure у `login()` тепер
+  propagates (було: warning → misleading error при `sign()`)
+
+### Безпека
+
+- `opensc_signer.py`: PIN замаскований у debug-логах (`--pin ***`)
+- Consistent `return False` у всіх `__exit__` методах
+
+### Hardening
+
+- Mutex `Global\EKAlmaz1COpenMutex` додано до pre-flight check
+- AppData/Roaming path додано до `VirtualSigner.DEFAULT_VIRTUAL_PATHS`
+- `requirements.txt`: знято `platform_system == "Windows"` з PyKCS11
+  (потрібен на Linux для virtual backend через Wine)
+- `.gitignore` += `.mypy_cache/`
+- `smoke_test.py`: subprocess timeout=10
+- `pkcs11_signer.py`/`virtual_signer.py`: logout — log перед pass
+- `detect_dstu4145_mechanism`: Virtual module тепер потрапляє у перший
+  branch (HW і Virtual share the same mechanism IDs)
+- Мертвий код видалено: `ElementTree` import, `DEFAULT_HTTP/HTTPS_PORT`,
+  `MECH_NAME_HINTS`; CLI-методи анотовані
+- Ansible: `ansible_date_time.date` замість shell `date` (timezone safety)
+- `fiddler_analyze.py`: SAZ session number parsing за реальними файлами
+- `release.yml`: SHA256 checksums у GitHub Release
+- `opensc_signer._run()`: stderr логується на debug level
+- `docs/MINIMUM-FILES-LIST.md`: секція "Bitness: do not mix 32/64"
+- `README_uk.md`: повний переклад англійського README
+
 ## v0.26 — 2026-04-16
 
 ### Додано

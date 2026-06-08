@@ -5,7 +5,7 @@ Project:  sedo-client
 Author:   Vladyslav V. Prodan
 Contact:  github.com/click0
 Phone:    +38(099)6053340
-Version:  0.26
+Version:  0.27
 License:  BSD 3-Clause "New" or "Revised" License
 Year:     2025-2026
 ```
@@ -424,7 +424,7 @@ class IITClient:
 
 ## 8. Прогрес
 
-### Реалізовано (v0.26)
+### Реалізовано (v0.27)
 
 - ✅ Python JSON-RPC клієнт (`iit_client.py`) — з auto-discovery агента
 - ✅ OpenSC subprocess backend (`opensc_signer.py`)
