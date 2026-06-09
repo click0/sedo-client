@@ -183,6 +183,164 @@ class TestSEDOClientContextManager:
                 assert client.signer is signer
         assert not signer.logged_in
 
+    def test_exit_closes_session_even_if_logout_raises(self):
+        """HTTP session is closed even if signer.logout() throws."""
+        signer = FakeSigner()
+        signer.logout = MagicMock(side_effect=RuntimeError("boom"))
+        with patch("sedo_client.SEDOClient._pick_backend", return_value=signer):
+            client = SEDOClient()
+        client.session = MagicMock()
+        with pytest.raises(RuntimeError, match="boom"):
+            client.__exit__(None, None, None)
+        client.session.close.assert_called_once()
+
+
+# ─── Backend mechanism selection (Avest vs IIT) ─────────────
+
+class TestOpenSCMechanismSelection:
+    def _capture_opensc(self, module_path):
+        """Build a SEDOClient with opensc backend, capturing OpenSCSigner kwargs."""
+        captured = {}
+
+        def fake_signer(**kwargs):
+            captured.update(kwargs)
+            return FakeSigner()
+
+        with patch("opensc_signer.OpenSCSigner", side_effect=fake_signer):
+            SEDOClient(backend="opensc", module_path=module_path)
+        return captured
+
+    def test_iit_module_gets_vendor_mechanism(self):
+        captured = self._capture_opensc(r"C:\libs\PKCS11.EKeyAlmaz1C.dll")
+        assert captured["mechanism"] == "0x80420031"
+
+    def test_avest_module_gets_standard_mechanism(self):
+        captured = self._capture_opensc(r"C:\Avest\Av337CryptokiD.dll")
+        assert captured["mechanism"] == "0x00000352"
+
+
+# ─── HTTP auth flows ────────────────────────────────────────
+
+def _make_client(url="https://sedo.mod.gov.ua"):
+    signer = FakeSigner()
+    with patch("sedo_client.SEDOClient._pick_backend", return_value=signer):
+        client = SEDOClient(sedo_url=url)
+    client.session = MagicMock()
+    return client, signer
+
+
+class TestFlowOIDC:
+    def test_no_idp_redirect_returns_false(self):
+        client, _ = _make_client()
+        client.session.get.return_value = MagicMock(
+            headers={"Location": "https://sedo.mod.gov.ua/home"})
+        assert client._flow_oidc(b"cert", "1234") is False
+
+    def test_idp_redirect_still_unimplemented(self):
+        """id.gov.ua detected but OIDC dance not implemented → False."""
+        client, _ = _make_client()
+        client.session.get.return_value = MagicMock(
+            headers={"Location": "https://id.gov.ua/auth?x=1"})
+        assert client._flow_oidc(b"cert", "1234") is False
+
+
+class TestFlowDirectKEP:
+    def test_success(self):
+        client, signer = _make_client()
+        challenge = base64.b64encode(b"challenge-bytes").decode()
+        init = MagicMock(status_code=200)
+        init.json.return_value = {"challenge": challenge, "session_id": "s1"}
+        verify = MagicMock(ok=True)
+        client.session.post.side_effect = [init, verify]
+
+        assert client._flow_direct_kep(b"cert", "1234") is True
+        # signer.sign must have been called with the decoded challenge
+        assert client.session.post.call_count == 2
+        # verify URL ends with /verify
+        verify_call = client.session.post.call_args_list[1]
+        assert verify_call.args[0].endswith("/verify")
+
+    def test_all_candidates_non_200_returns_false(self):
+        client, _ = _make_client()
+        client.session.post.return_value = MagicMock(status_code=404)
+        assert client._flow_direct_kep(b"cert", "1234") is False
+
+    def test_non_string_challenge_skipped(self):
+        client, _ = _make_client()
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = {"challenge": {"nested": "dict"}}
+        client.session.post.return_value = resp
+        assert client._flow_direct_kep(b"cert", "1234") is False
+
+
+class TestFlowCMSPost:
+    def test_raises_not_implemented(self):
+        client, _ = _make_client()
+        with pytest.raises(NotImplementedError):
+            client._flow_cms_post(b"cert", "1234")
+
+
+class TestAuthorize:
+    def test_all_flows_fail_raises(self):
+        client, _ = _make_client()
+        # oidc GET: no idp; direct_kep POST: all 404; cms_post raises
+        client.session.get.return_value = MagicMock(headers={"Location": ""})
+        client.session.post.return_value = MagicMock(status_code=404)
+        with pytest.raises(RuntimeError, match="All auth flows failed"):
+            client.authorize("1234")
+
+    def test_success_returns_none(self):
+        client, _ = _make_client()
+        client.session.get.return_value = MagicMock(headers={"Location": ""})
+        challenge = base64.b64encode(b"abc").decode()
+        init = MagicMock(status_code=200)
+        init.json.return_value = {"challenge": challenge}
+        verify = MagicMock(ok=True)
+        client.session.post.side_effect = [init, verify]
+        assert client.authorize("1234") is None
+
+
+class TestFetchInbox:
+    def test_returns_documents(self):
+        client, _ = _make_client()
+        resp = MagicMock()
+        resp.json.return_value = {"documents": [{"id": "d1"}, {"id": "d2"}]}
+        resp.raise_for_status = MagicMock()
+        client.session.get.return_value = resp
+        docs = client.fetch_inbox()
+        assert [d["id"] for d in docs] == ["d1", "d2"]
+
+    def test_passes_since_param(self):
+        client, _ = _make_client()
+        resp = MagicMock()
+        resp.json.return_value = {"documents": []}
+        client.session.get.return_value = resp
+        client.fetch_inbox(since="2026-06-01")
+        kwargs = client.session.get.call_args.kwargs
+        assert kwargs["params"] == {"since": "2026-06-01"}
+
+    def test_raises_on_http_error(self):
+        client, _ = _make_client()
+        resp = MagicMock()
+        resp.raise_for_status.side_effect = RuntimeError("HTTP 500")
+        client.session.get.return_value = resp
+        with pytest.raises(RuntimeError, match="HTTP 500"):
+            client.fetch_inbox()
+
+
+class TestDownloadDocument:
+    def test_writes_zip_and_creates_dir(self, tmp_path):
+        client, _ = _make_client()
+        resp = MagicMock(content=b"PK\x03\x04zip")
+        resp.raise_for_status = MagicMock()
+        client.session.get.return_value = resp
+
+        out_dir = tmp_path / "downloads" / "2026-06-08"
+        assert not out_dir.exists()
+        path = client.download_document("doc-42", out_dir)
+        assert path == out_dir / "doc-42.zip"
+        assert path.read_bytes() == b"PK\x03\x04zip"
+
 
 # ─── Windows console encoding ───────────────────────────────
 

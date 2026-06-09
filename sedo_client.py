@@ -88,10 +88,15 @@ class SEDOClient:
         if name in ("opensc", "auto"):
             try:
                 from opensc_signer import OpenSCSigner
+                from mechanism_ids import detect_dstu4145_mechanism
                 if module_path is None:
                     raise ValueError("OpenSC backend requires --module path")
-                signer = OpenSCSigner(module_path=module_path)
-                log.info("Backend: OpenSC pkcs11-tool (subprocess)")
+                # Vendor-correct DSTU 4145 mechanism: IIT 0x80420031,
+                # Avest (Av337/avcryptoki) 0x00000352.
+                mech = f"0x{detect_dstu4145_mechanism(module_path):08X}"
+                signer = OpenSCSigner(module_path=module_path, mechanism=mech)
+                log.info("Backend: OpenSC pkcs11-tool (subprocess), mechanism %s",
+                         mech)
                 return signer
             except Exception as e:
                 if name == "opensc":
@@ -152,9 +157,12 @@ class SEDOClient:
 
     # ─── Авторизація ─────────────────────────────────────────
 
-    def authorize(self, pin: str) -> bool:
+    def authorize(self, pin: str) -> None:
         """
         Повний flow: login у токен → challenge від СЕДО → підпис → verify.
+
+        Повертає None при успіху, кидає RuntimeError якщо жоден flow не
+        спрацював.
 
         Точні URL-endpoints СЕДО ЗСУ уточнюються Fiddler-ом (30 хв роботи).
         Поки що — 3 можливі flow.
@@ -175,7 +183,7 @@ class SEDOClient:
             try:
                 if flow_fn(cert, pin):
                     log.info("✓ Authorized via %s", flow_name)
-                    return True
+                    return
             except (requests.RequestException, ValueError, RuntimeError,
                     NotImplementedError) as e:
                 log.debug("%s flow failed: %s", flow_name, e)
@@ -252,6 +260,8 @@ class SEDOClient:
         return r.json().get("documents", [])
 
     def download_document(self, doc_id: str, output_dir: Path) -> Path:
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
         r = self.session.get(f"{self.sedo_url}/api/documents/{doc_id}/export",
                              timeout=60)
         r.raise_for_status()
@@ -263,8 +273,12 @@ class SEDOClient:
         return self
 
     def __exit__(self, *args):
-        self.signer.logout()
-        self.session.close()
+        # Close the HTTP session even if logout() raises, to avoid leaks.
+        try:
+            self.signer.logout()
+        finally:
+            self.session.close()
+        return False
 
 
 class IITAgentAdapter:
