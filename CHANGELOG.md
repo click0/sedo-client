@@ -9,6 +9,38 @@ License:  BSD 3-Clause "New" or "Revised" License
 
 ## Unreleased
 
+### Виправлено (критичне)
+
+- **`pip install .` був зламаний**: `pyproject.toml` мав неіснуючий
+  `build-backend = "setuptools.backends._legacy:_Backend"`. Виправлено на
+  `setuptools.build_meta`. Перевірено: wheel збирається, console-script
+  `sedo-client` присутній. Жоден CI-крок цього не ловив (release пакує
+  git archive, build-воркфлоу — PyInstaller).
+- **Avest у backend `opensc` підписувався неправильним механізмом**:
+  `OpenSCSigner` хардкодив IIT `0x80420031`, тож `--backend opensc --module
+  Av337CryptokiD.dll` (ST-338) використовував не той mechanism. Тепер
+  `_pick_backend` визначає mechanism за модулем через
+  `detect_dstu4145_mechanism()` (IIT → 0x80420031, Avest → 0x00000352) і
+  передає його в `OpenSCSigner`. Закриває і режим `auto`, де opensc
+  пробується першим. +2 тести.
+
+### Виправлено (гігієна)
+
+- `SEDOClient.__exit__` тепер закриває HTTP-сесію навіть якщо `logout()`
+  кинув виняток (раніше — витік сокета); додано `return False`
+- `download_document()` створює `output_dir` сам (раніше mkdir був лише в
+  `main()` — падало при використанні як бібліотеки)
+- `authorize()` сигнатура `-> None` (раніше `-> bool`, але метод завжди
+  повертав `True` або кидав — анотація брехала)
+
+### Тести
+
+- **+15 тестів HTTP-шару** (`test_sedo_client.py`, всього 88): auth-flow
+  (oidc / direct_kep / cms_post), `authorize` (успіх і повний провал),
+  `fetch_inbox` (документи, since-параметр, HTTP-помилка),
+  `download_document` (запис zip + створення каталогу), вибір механізму
+  opensc для IIT/Avest, закриття сесії при винятку logout
+
 ### Виправлено (Windows)
 
 - **Краш на українській Windows-консолі**: `print("✓ ...")` падав із
