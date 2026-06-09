@@ -317,6 +317,12 @@ class IITClient:
                               err.get("data"))
 
         result = data.get("result")
+
+        # IIT extension: agent may return session_id after Initialize.
+        # Must be sent back in all subsequent requests (see PROTOCOL-JSON-RPC.md).
+        if "session_id" in data and data["session_id"]:
+            self._session_id = data["session_id"]
+
         log.debug("← %s", result)
         return result
 
@@ -375,9 +381,12 @@ class IITClient:
         Після цього sign() може працювати.
 
         ⚠️ Алмаз-1К: після 15 невдалих спроб PIN ключ знищується!
+
+        Формат параметрів підтверджений документацією PROTOCOL-JSON-RPC.md:
+        [device_dict, pin_string]. device_dict — об'єкт з EnumKeyMediaDevices
+        (поля devIndex, typeIndex, keyMedia). Перевірено на прикладах
+        із реального JS-віджета ІІТ.
         """
-        # Точний сигнатур: перший параметр — опис пристрою, другий — пароль
-        # (Формат уточнюється з реального API dump)
         self.call("ReadPrivateKey", [device, pin])
 
     def is_private_key_read(self) -> bool:

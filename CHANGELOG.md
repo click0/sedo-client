@@ -9,6 +9,23 @@ License:  BSD 3-Clause "New" or "Revised" License
 
 ## Unreleased
 
+### Виправлено (протокол)
+
+- **`iit_client.call()` тепер зберігає `session_id` з відповіді агента**:
+  IIT EUSignAgent повертає `session_id` після `Initialize`, який має
+  передаватись у кожному наступному запиті. Раніше поле ігнорувалось і
+  `_session_id` завжди лишався `None`. +1 тест.
+- `ReadPrivateKey` docstring оновлено: формат параметрів підтверджений
+  через PROTOCOL-JSON-RPC.md і JS-віджет ІІТ.
+
+### Документація (чесність README)
+
+- **README / README_uk: додано секцію "Current status"** — чітко розділяє
+  що працює зараз (крипто-шар, токени, Ansible, CI) і що потребує
+  Fiddler-capture живої сесії СЕДО (auth flows, API endpoints).
+  Раніше README представляв проект як повністю робочий "login → fetch →
+  verify → Telegram", тоді як серверний шар — каркас на здогаданих URL.
+
 ### Виправлено (критичне)
 
 - **`pip install .` був зламаний**: `pyproject.toml` мав неіснуючий

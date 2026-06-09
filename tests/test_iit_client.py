@@ -70,6 +70,27 @@ class TestJSONRPCProtocol:
         assert payload["session_id"] == "test-session-123"
 
     @patch("iit_client.requests.Session")
+    def test_session_id_captured_from_response(self, mock_session_cls):
+        """session_id from agent response is stored and sent in next call."""
+        mock_session = MagicMock()
+        mock_session_cls.return_value = mock_session
+        # First call: agent returns session_id
+        mock_session.post.return_value = MagicMock(
+            status_code=200,
+            json=lambda: {
+                "jsonrpc": "2.0", "id": 1, "result": None,
+                "session_id": "agent-sid-42"
+            }
+        )
+        client = IITClient(port=9100)
+        client.call("Initialize")
+        assert client._session_id == "agent-sid-42"
+        # Second call must include it in the payload
+        client.call("GetVersion")
+        payload = mock_session.post.call_args.kwargs["json"]
+        assert payload["session_id"] == "agent-sid-42"
+
+    @patch("iit_client.requests.Session")
     def test_rpc_error_raises(self, mock_session_cls):
         """RPC error → IITRPCError."""
         mock_session = MagicMock()

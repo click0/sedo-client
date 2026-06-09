@@ -28,6 +28,27 @@ A nightly cron job driven from a Linux host that:
 
 Everything runs unattended — no operator prompts.
 
+## Current status
+
+**What works now:**
+
+- Cryptographic layer: PKCS#11 signing via IIT Almaz-1K (HW, virtual) and
+  Avest CC-337 / ST-338 — tested with real tokens
+- Four backends: `opensc`, `pkcs11`, `virtual`, `iit_agent`
+- Ansible automation: Windows (WinRM) and Linux (Wine) playbooks
+- CI/CD: spellcheck, test suite (88 tests), release with binaries
+
+**What requires a Fiddler capture on a live SEDO session:**
+
+- `_flow_oidc` — id.gov.ua OIDC dance not implemented (returns False)
+- `_flow_direct_kep` — probes 3 guessed endpoints; real URLs unknown
+- `_flow_cms_post` — raises NotImplementedError
+- `fetch_inbox` / `download_document` — guessed API paths
+
+To complete the server integration, run `scripts/fiddler_analyze.py` on a
+SAZ capture of a real login session and update the `_flow_*` methods and
+API paths accordingly. See [`FIDDLER-CAPTURE-GUIDE.md`](FIDDLER-CAPTURE-GUIDE.md).
+
 ## Architecture
 
 ```

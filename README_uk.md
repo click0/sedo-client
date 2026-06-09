@@ -28,6 +28,27 @@ Year:     2025-2026
 
 Все працює автоматично без втручання оператора.
 
+## Поточний стан
+
+**Що працює зараз:**
+
+- Криптографічний шар: PKCS#11 підпис через IIT Алмаз-1К (HW, virtual)
+  та Avest CC-337 / ST-338 — перевірено на реальних токенах
+- Чотири backend-и: `opensc`, `pkcs11`, `virtual`, `iit_agent`
+- Ansible-автоматизація: Windows (WinRM) та Linux (Wine) playbook-и
+- CI/CD: перевірка правопису, тести (88), реліз з бінарниками
+
+**Що потребує Fiddler-capture живої сесії СЕДО:**
+
+- `_flow_oidc` — OIDC-танець id.gov.ua не реалізований (повертає False)
+- `_flow_direct_kep` — пробує 3 здогадані endpoint-и; реальні URL невідомі
+- `_flow_cms_post` — кидає NotImplementedError
+- `fetch_inbox` / `download_document` — здогадані шляхи API
+
+Щоб завершити серверну інтеграцію, виконайте `scripts/fiddler_analyze.py`
+на SAZ-capture реального логіну й оновіть `_flow_*` методи та API-шляхи.
+Див. [`FIDDLER-CAPTURE-GUIDE.md`](FIDDLER-CAPTURE-GUIDE.md).
+
 ## Архітектура
 
 ```
