@@ -93,23 +93,39 @@ class VirtualSigner:
         )
 
     def _find_sign_mechanism(self) -> int:
-        """Find DSTU 4145 signing mechanism (vendor-defined, >= 0x80000000)."""
+        """
+        Find the DSTU 4145 signing mechanism on the virtual token.
+
+        Prefers a known DSTU 4145 ID (IIT 0x80420031/32 or standard
+        0x00000352), then any vendor-defined (>= 0x80000000) with CKF_SIGN.
+        """
+        from mechanism_ids import pick_sign_mechanism
+
         slots = self._pkcs11.getSlotList(tokenPresent=True)
         if not slots:
             raise RuntimeError("No virtual token slot")
         slot = slots[0]
 
-        mech_types = self._pkcs11.getMechanismList(slot)
-        for mt in mech_types:
-            mech_id = int(mt)
+        mech_types = [int(mt) for mt in self._pkcs11.getMechanismList(slot)]
+
+        # 1. Known DSTU 4145 ID with sign capability
+        known = pick_sign_mechanism(mech_types)
+        if known is not None:
+            info = self._pkcs11.getMechanismInfo(slot, known)
+            if int(info.flags) & self._PyKCS11.CKF_SIGN:
+                log.info("Selected known DSTU 4145 mechanism: 0x%08X", known)
+                return known
+
+        # 2. Any vendor-defined signing mechanism
+        for mech_id in mech_types:
             if mech_id < 0x80000000:
                 continue
             info = self._pkcs11.getMechanismInfo(slot, mech_id)
             if int(info.flags) & self._PyKCS11.CKF_SIGN:
-                log.info("Selected sign mechanism: 0x%08X", mech_id)
+                log.info("Selected vendor sign mechanism: 0x%08X", mech_id)
                 return mech_id
 
-        raise RuntimeError("No vendor signing mechanism found on virtual token")
+        raise RuntimeError("No signing mechanism found on virtual token")
 
     def login(self, pin: str, slot: Optional[int] = None) -> None:
         from pkcs11_signer import check_almaz_mutex

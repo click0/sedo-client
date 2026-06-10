@@ -272,6 +272,18 @@ class TestFlowDirectKEP:
         client.session.post.return_value = resp
         assert client._flow_direct_kep(b"cert", "1234") is False
 
+    def test_bytes_challenge_passthrough(self):
+        """A bytes challenge is signed as-is (not base64-decoded)."""
+        client, signer = _make_client()
+        signer.sign = MagicMock(return_value=b"\x00" * 64)
+        init = MagicMock(status_code=200)
+        init.json.return_value = {"challenge": b"raw-bytes", "session_id": "s"}
+        verify = MagicMock(ok=True)
+        client.session.post.side_effect = [init, verify]
+
+        assert client._flow_direct_kep(b"cert", "1234") is True
+        signer.sign.assert_called_once_with(b"raw-bytes")
+
 
 class TestFlowCMSPost:
     def test_raises_not_implemented(self):
