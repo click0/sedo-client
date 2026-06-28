@@ -9,6 +9,14 @@ License:  BSD 3-Clause "New" or "Revised" License
 
 ## Unreleased
 
+### CI
+
+- **Новий test-воркфлоу** (`.github/workflows/tests.yml`): pytest на push/PR
+  у `main`, матриця Python 3.11 + 3.12, плюс перевірка що пакет збирається,
+  встановлюється і console-script `sedo-client` працює. Раніше на звичайних
+  push/PR ганявся лише spellcheck — тести спрацьовували тільки на тегах
+  `v*` (release/build воркфлоу), тож зламані тести могли пройти в `main`.
+
 ### Виправлено (протокол)
 
 - **`iit_client.call()` тепер зберігає `session_id` з відповіді агента**:
