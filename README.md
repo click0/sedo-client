@@ -9,7 +9,7 @@ via the Almaz-1K USB token and IIT "Користувач ЦСК-1" (End User).
 Author:   Vladyslav V. Prodan
 Contact:  github.com/click0
 Phone:    +38(099)6053340
-Version:  0.27
+Version:  0.28
 License:  BSD 3-Clause "New" or "Revised" License
 Year:     2025-2026
 ```
@@ -36,7 +36,7 @@ Everything runs unattended — no operator prompts.
   Avest CC-337 / ST-338 — tested with real tokens
 - Four backends: `opensc`, `pkcs11`, `virtual`, `iit_agent`
 - Ansible automation: Windows (WinRM) and Linux (Wine) playbooks
-- CI/CD: spellcheck, test suite (88 tests), release with binaries
+- CI/CD: spellcheck, test suite (90 tests), release with binaries
 
 **What requires a Fiddler capture on a live SEDO session:**
 
@@ -213,8 +213,8 @@ python -m pytest tests/ -v
 To cut a release:
 
 ```bash
-git tag v0.27
-git push origin v0.27
+git tag v0.28
+git push origin v0.28
 ```
 
 ## Related projects

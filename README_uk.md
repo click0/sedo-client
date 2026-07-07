@@ -9,7 +9,7 @@
 Author:   Vladyslav V. Prodan
 Contact:  github.com/click0
 Phone:    +38(099)6053340
-Version:  0.27
+Version:  0.28
 License:  BSD 3-Clause "New" or "Revised" License
 Year:     2025-2026
 ```
@@ -36,7 +36,7 @@ Year:     2025-2026
   та Avest CC-337 / ST-338 — перевірено на реальних токенах
 - Чотири backend-и: `opensc`, `pkcs11`, `virtual`, `iit_agent`
 - Ansible-автоматизація: Windows (WinRM) та Linux (Wine) playbook-и
-- CI/CD: перевірка правопису, тести (88), реліз з бінарниками
+- CI/CD: перевірка правопису, тести (90), реліз з бінарниками
 
 **Що потребує Fiddler-capture живої сесії СЕДО:**
 
@@ -212,8 +212,8 @@ python -m pytest tests/ -v
 Щоб зробити реліз:
 
 ```bash
-git tag v0.27
-git push origin v0.27
+git tag v0.28
+git push origin v0.28
 ```
 
 ## Пов'язані проекти
