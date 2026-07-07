@@ -7,7 +7,7 @@ Contact:  github.com/click0
 License:  BSD 3-Clause "New" or "Revised" License
 ```
 
-## Unreleased
+## v0.28 — 2026-07-07
 
 ### CI
 
