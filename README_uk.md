@@ -150,27 +150,38 @@ sedo-client/
 ├── sedo_client.py              — бізнес-логіка, авто-вибір backend, CLI
 ├── iit_client.py               — JSON-RPC клієнт до EUSignAgent
 ├── opensc_signer.py            — OpenSC subprocess backend (рекомендовано)
-├── pkcs11_signer.py            — PyKCS11 direct backend
+├── pkcs11_signer.py            — PyKCS11 direct backend (HW + Avest)
+├── virtual_signer.py           — PyKCS11 virtual backend (Key-6.dat, без USB)
 ├── mechanism_ids.py            — константи PKCS#11 mechanism IDs (DSTU 4145)
 ├── opensc-test-almaz.ps1       — PowerShell валідація стеку на Windows
+├── pyproject.toml              — пакування (pip install .)
 ├── requirements.txt
-├── tests/
+├── tests/                      — 90 юніт-тестів
 │   ├── conftest.py
-│   └── test_iit_client.py      — 13 юніт-тестів
+│   ├── test_iit_client.py
+│   ├── test_sedo_client.py
+│   ├── test_opensc_signer.py
+│   ├── test_virtual_signer.py
+│   └── test_avest.py
 ├── scripts/
 │   ├── fiddler_analyze.py      — розбирає Fiddler SAZ capture
-│   └── smoke_test.py           — швидка перевірка середовища
+│   ├── smoke_test.py           — швидка перевірка середовища
+│   └── build_binary.py         — PyInstaller onefile helper
 ├── ansible/
 │   ├── inventory/
 │   │   ├── hosts.yml
 │   │   └── vault.yml.example
 │   └── playbooks/
-│       └── sedo_daily.yml
-├── docs/                       — архітектура, звіт реверсу,
-│                                 JSON-RPC протокол, таблиця механізмів
+│       ├── sedo_daily.yml       — Windows worker (WinRM)
+│       └── sedo_daily_linux.yml — Linux worker (Wine)
+├── docs/                       — архітектура, звіт реверсу, JSON-RPC
+│                                 протокол, таблиця механізмів, Wine deploy
 ├── .github/workflows/
+│   ├── tests.yml               — pytest на push / PR (3.11, 3.12)
 │   ├── spellcheck.yml          — cspell на push / PR
-│   └── release.yml             — тригер на тег v*
+│   ├── release.yml             — архіви + checksums на тег v*
+│   ├── build-windows.yml       — Windows .exe на тег v*
+│   └── build-unix.yml          — Linux + FreeBSD бінарники на тег v*
 ├── .cspell.json
 ├── README.md                   — English
 ├── README_uk.md                — цей файл (українська)
@@ -196,18 +207,24 @@ sedo-client/
 ```bash
 pip install pytest requests
 python -m pytest tests/ -v
-# 13 passed
+# 90 passed
 ```
 
 ## CI
 
-- **Spellcheck** (`.github/workflows/spellcheck.yml`) — `cspell` запускається
-  на кожному push та pull request в `main`. Кирилиця ігнорується через regex
-  у `.cspell.json`; whitelist покриває проектний жаргон (DSTU, PKCS, IIT,
-  Kupyna, Kalyna, …).
-- **Release** (`.github/workflows/release.yml`) — тригериться push-ем тегу
-  `v*`. Запускає тести, витягує відповідну секцію з `CHANGELOG.md`, пакує
-  архіви `tar.gz` + `zip` та публікує GitHub Release.
+На кожен push / pull request у `main`:
+
+- **Tests** (`tests.yml`) — `pytest` на Python 3.11 та 3.12, плюс перевірка
+  збірки й встановлення (`pip install .`, запуск `sedo-client --help`)
+- **Spellcheck** (`spellcheck.yml`) — `cspell`; кирилиця ігнорується через
+  regex у `.cspell.json`, whitelist покриває жаргон (DSTU, PKCS, IIT, …)
+
+На тег `v*`:
+
+- **Release** (`release.yml`) — тести, витяг секції з `CHANGELOG.md`, пакування
+  `tar.gz` + `zip` + SHA256 checksums, публікація GitHub Release
+- **build-windows.yml** — standalone `.exe` (PyInstaller)
+- **build-unix.yml** — Linux ELF + FreeBSD ELF
 
 Щоб зробити реліз:
 
