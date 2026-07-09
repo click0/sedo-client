@@ -150,27 +150,38 @@ sedo-client/
 ├── sedo_client.py              — business logic, auto backend picker, CLI
 ├── iit_client.py               — JSON-RPC client for EUSignAgent
 ├── opensc_signer.py            — OpenSC subprocess backend (recommended)
-├── pkcs11_signer.py            — PyKCS11 direct backend
+├── pkcs11_signer.py            — PyKCS11 direct backend (HW + Avest)
+├── virtual_signer.py           — PyKCS11 virtual backend (Key-6.dat, no USB)
 ├── mechanism_ids.py            — PKCS#11 mechanism ID constants (DSTU 4145)
 ├── opensc-test-almaz.ps1       — PowerShell stack validator for Windows
+├── pyproject.toml              — packaging (pip install .)
 ├── requirements.txt
-├── tests/
+├── tests/                      — 90 unit tests
 │   ├── conftest.py
-│   └── test_iit_client.py      — 13 unit tests
+│   ├── test_iit_client.py
+│   ├── test_sedo_client.py
+│   ├── test_opensc_signer.py
+│   ├── test_virtual_signer.py
+│   └── test_avest.py
 ├── scripts/
 │   ├── fiddler_analyze.py      — parses a Fiddler SAZ capture
-│   └── smoke_test.py           — quick environment check
+│   ├── smoke_test.py           — quick environment check
+│   └── build_binary.py         — PyInstaller onefile helper
 ├── ansible/
 │   ├── inventory/
 │   │   ├── hosts.yml
 │   │   └── vault.yml.example
 │   └── playbooks/
-│       └── sedo_daily.yml
+│       ├── sedo_daily.yml       — Windows worker (WinRM)
+│       └── sedo_daily_linux.yml — Linux worker (Wine)
 ├── docs/                       — architecture, reverse-engineering report,
-│                                 JSON-RPC protocol, mechanism table
+│                                 JSON-RPC protocol, mechanism table, Wine deploy
 ├── .github/workflows/
+│   ├── tests.yml               — pytest on push / PR (3.11, 3.12)
 │   ├── spellcheck.yml          — cspell on push / PR
-│   └── release.yml             — triggered by v* tags
+│   ├── release.yml             — source archives + checksums on v* tags
+│   ├── build-windows.yml       — Windows .exe on v* tags
+│   └── build-unix.yml          — Linux + FreeBSD binaries on v* tags
 ├── .cspell.json
 ├── README.md                   — this file (English)
 ├── README_uk.md                — Ukrainian version
@@ -196,19 +207,25 @@ sedo-client/
 ```bash
 pip install pytest requests
 python -m pytest tests/ -v
-# 13 passed
+# 90 passed
 ```
 
 ## CI
 
-- **Spellcheck** (`.github/workflows/spellcheck.yml`) — `cspell` runs on every
-  push and pull request against `main`. Cyrillic runs are ignored via a regex
-  in `.cspell.json`; the whitelist covers project jargon (DSTU, PKCS, IIT,
-  Kupyna, Kalyna, …).
-- **Release** (`.github/workflows/release.yml`) — triggered by pushing a
-  `v*` tag. Runs the test suite, extracts the matching section from
-  `CHANGELOG.md`, packages `tar.gz` + `zip` archives, and publishes a
-  GitHub Release.
+On every push / pull request to `main`:
+
+- **Tests** (`tests.yml`) — `pytest` on Python 3.11 and 3.12, plus a
+  build-and-install check (`pip install .`, run `sedo-client --help`)
+- **Spellcheck** (`spellcheck.yml`) — `cspell`; Cyrillic ignored via a regex
+  in `.cspell.json`, whitelist covers project jargon (DSTU, PKCS, IIT, …)
+
+On a `v*` tag:
+
+- **Release** (`release.yml`) — runs tests, extracts the matching
+  `CHANGELOG.md` section, packages `tar.gz` + `zip` + SHA256 checksums,
+  publishes a GitHub Release
+- **build-windows.yml** — standalone `.exe` (PyInstaller)
+- **build-unix.yml** — Linux ELF + FreeBSD ELF
 
 To cut a release:
 
