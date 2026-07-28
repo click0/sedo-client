@@ -7,6 +7,21 @@ Contact:  github.com/click0
 License:  BSD 3-Clause "New" or "Revised" License
 ```
 
+## Unreleased
+
+### Виправлено
+
+- **`scripts/smoke_test.py` падав на українській Windows-консолі**: друкує
+  emoji `✓ ✗ ⚠`, але UTF-8 фікс (PR по Windows-крашу) до нього не застосували
+  — на cp1251/cp866 `UnicodeEncodeError` на першому ж `print`. Це «запусти
+  першим» діагностичний скрипт. Додано reconfigure stdout/stderr у `main()`.
+- `iit_client.discover_agent`: fallback-порти тепер пробуються і як HTTP,
+  і як HTTPS (8083/8443 — HTTPS-порти агента; раніше проба була мертвою).
+- `iit_client.probe_port`: suppress urllib3 `InsecureRequestWarning` при
+  HTTPS-discovery (self-signed cert агента на localhost).
+- `sedo_client._flow_direct_kep`: лог challenge тепер каже "chars"/"bytes"
+  залежно від типу (раніше завжди "chars" навіть для bytes).
+
 ## v0.28 — 2026-07-07
 
 ### CI
