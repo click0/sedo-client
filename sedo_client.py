@@ -223,7 +223,8 @@ class SEDOClient:
                 if not challenge or not isinstance(challenge, (str, bytes)):
                     continue
 
-                log.info("Got challenge (%d chars)", len(challenge))
+                log.info("Got challenge (%d %s)", len(challenge),
+                         "chars" if isinstance(challenge, str) else "bytes")
                 challenge_bytes = (
                     base64.b64decode(challenge) if isinstance(challenge, str)
                     else challenge

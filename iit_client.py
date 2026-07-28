@@ -159,8 +159,15 @@ def probe_port(host: str = "127.0.0.1", port: int = 9100,
     scheme = "https" if use_https else "http"
     url = f"{scheme}://{host}:{port}/json-rpc"
     try:
+        if use_https:
+            # self-signed agent cert on localhost — silence urllib3 warning
+            try:
+                import urllib3
+                urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            except ImportError:
+                pass
         # OPTIONS preflight — агент підтримує CORS
-        r = requests.options(url, timeout=timeout, verify=False)
+        r = requests.options(url, timeout=timeout, verify=not use_https)
         return r.status_code in (200, 204, 405)
     except requests.exceptions.RequestException:
         return False
@@ -179,10 +186,12 @@ def discover_agent() -> Optional[tuple[str, int, bool]]:
     # HTTPS з реєстру
     if https_port and probe_port("127.0.0.1", https_port, use_https=True):
         return "127.0.0.1", https_port, True
-    # Fallback порти
+    # Fallback порти — пробуємо і HTTP, і HTTPS (8083/8443 — HTTPS-порти агента)
     for p in FALLBACK_PORTS:
         if probe_port("127.0.0.1", p):
             return "127.0.0.1", p, False
+        if probe_port("127.0.0.1", p, use_https=True):
+            return "127.0.0.1", p, True
     return None
 
 
