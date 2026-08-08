@@ -124,6 +124,8 @@ def detect_token_vendor(pkcs11_module_path: str) -> str:
     Визначити вендора токена за ім'ям PKCS#11 модуля.
 
     Повертає одне з: "iit", "iit_virtual", "avest", "unknown".
+    Ключ "avest" відповідає токенам SecureToken-337/338 та AvestKey/EfitKey —
+    вендор ТОВ "Автор" (Avtor), у деяких джерелах Avest / AvestUA.
     """
     name = pkcs11_module_path.lower()
     if 'virtual' in name and 'ekeyalmaz1c' in name:

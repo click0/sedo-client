@@ -33,7 +33,7 @@ Everything runs unattended — no operator prompts.
 **What works now:**
 
 - Cryptographic layer: PKCS#11 signing via IIT Almaz-1K (HW, virtual) and
-  Avest CC-337 / ST-338 — tested with real tokens
+  Автор (Avest) CC-337 / SecureToken-338 — tested with real tokens
 - Four backends: `opensc`, `pkcs11`, `virtual`, `iit_agent`
 - Ansible automation: Windows (WinRM) and Linux (Wine) playbooks
 - CI/CD: spellcheck, test suite (90 tests), release with binaries
@@ -89,8 +89,11 @@ Selectable backends:
 |---|---|---|
 | IIT Almaz-1K (HW) | `PKCS11.EKeyAlmaz1C.dll` | `0x80420031` |
 | IIT Almaz-1K (virtual) | `PKCS11.Virtual.EKeyAlmaz1C.dll` | `0x80420031` |
-| Avest CC-337 / SecureToken-338 | `Av337CryptokiD.dll` | `0x00000352` |
-| Avest AvestKey / EfitKey | `avcryptokinxt.dll` | `0x00000352` |
+| Автор (Avest) CC-337 / SecureToken-338 | `Av337CryptokiD.dll` | `0x00000352` |
+| Автор (Avest) AvestKey / EfitKey | `avcryptokinxt.dll` | `0x00000352` |
+
+> The SecureToken-337/338 vendor is referred to as **Автор (Avtor)** or
+> **Avest / AvestUA** in different sources; both name the same hardware.
 
 The `pkcs11` backend auto-detects the correct DSTU 4145 mechanism for each
 vendor. Pass `--module` pointing at the right DLL, e.g. for ST-338:

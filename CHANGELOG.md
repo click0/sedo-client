@@ -9,6 +9,13 @@ License:  BSD 3-Clause "New" or "Revised" License
 
 ## Unreleased
 
+### Документація
+
+- README (обидві мови) + `mechanism_ids.py`: вендора SecureToken-337/338
+  тепер підписано **«Автор (Avest)»** — під обома назвами, бо це той самий
+  токен ТОВ "Автор" (Avtor), який в ADDENDUM v4 фігурував як Avest / AvestUA.
+  Технічний ключ `detect_token_vendor` ("avest") не змінювався.
+
 ### Виправлено
 
 - **`scripts/smoke_test.py` падав на українській Windows-консолі**: друкує
