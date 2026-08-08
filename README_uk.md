@@ -9,7 +9,7 @@
 Author:   Vladyslav V. Prodan
 Contact:  github.com/click0
 Phone:    +38(099)6053340
-Version:  0.28
+Version:  0.28.1
 License:  BSD 3-Clause "New" or "Revised" License
 Year:     2025-2026
 ```
@@ -232,8 +232,8 @@ python -m pytest tests/ -v
 Щоб зробити реліз:
 
 ```bash
-git tag v0.28
-git push origin v0.28
+git tag v0.28.1
+git push origin v0.28.1
 ```
 
 ## Пов'язані проекти
