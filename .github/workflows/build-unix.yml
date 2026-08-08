@@ -75,9 +75,11 @@ jobs:
           release: "14.1"
           usesh: true
           prepare: |
-            pkg install -y python311 py311-pip py311-sqlite3 swig openssl
+            pkg install -y python311 py311-sqlite3 swig openssl
           run: |
             set -e
+            # FreeBSD has no py311-pip package — bootstrap pip from the stdlib.
+            python3.11 -m ensurepip --upgrade
             python3.11 -m pip install --upgrade pip
             python3.11 -m pip install requests pyinstaller pytest
             python3.11 -m pip install PyKCS11 || echo "PyKCS11 unavailable on FreeBSD — building opensc/iit_agent only"
