@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sedo-client"
-version = "0.28"
+version = "0.28.1"
 description = "Automation of the Ukrainian Armed Forces EDMS (sedo.mod.gov.ua)"
 readme = "README.md"
 license = {text = "BSD-3-Clause"}

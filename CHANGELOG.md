@@ -7,7 +7,16 @@ Contact:  github.com/click0
 License:  BSD 3-Clause "New" or "Revised" License
 ```
 
-## v0.28 (unreleased)
+## v0.28.1 — 2026-08-08
+
+### Виправлено (CI)
+
+- **FreeBSD-збірка падала** на `pkg install py311-pip` — такого пакета в
+  репозиторіях FreeBSD 14.1 немає. pip тепер бутстрапиться з stdlib
+  (`python3.11 -m ensurepip --upgrade`). Release + Linux + Windows для v0.28
+  зібрались; FreeBSD-бінарник додано цим патчем.
+
+## v0.28 — 2026-08-08
 
 ### Документація
 
