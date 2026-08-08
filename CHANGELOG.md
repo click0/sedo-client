@@ -7,7 +7,7 @@ Contact:  github.com/click0
 License:  BSD 3-Clause "New" or "Revised" License
 ```
 
-## Unreleased
+## v0.28 (unreleased)
 
 ### Документація
 
@@ -28,8 +28,6 @@ License:  BSD 3-Clause "New" or "Revised" License
   HTTPS-discovery (self-signed cert агента на localhost).
 - `sedo_client._flow_direct_kep`: лог challenge тепер каже "chars"/"bytes"
   залежно від типу (раніше завжди "chars" навіть для bytes).
-
-## v0.28 — 2026-07-07
 
 ### CI
 
