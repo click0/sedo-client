@@ -33,7 +33,7 @@ Year:     2025-2026
 **Що працює зараз:**
 
 - Криптографічний шар: PKCS#11 підпис через IIT Алмаз-1К (HW, virtual)
-  та Avest CC-337 / ST-338 — перевірено на реальних токенах
+  та Автор (Avest) CC-337 / SecureToken-338 — перевірено на реальних токенах
 - Чотири backend-и: `opensc`, `pkcs11`, `virtual`, `iit_agent`
 - Ansible-автоматизація: Windows (WinRM) та Linux (Wine) playbook-и
 - CI/CD: перевірка правопису, тести (90), реліз з бінарниками
@@ -89,8 +89,11 @@ Backend-и на вибір:
 |---|---|---|
 | IIT Алмаз-1К (HW) | `PKCS11.EKeyAlmaz1C.dll` | `0x80420031` |
 | IIT Алмаз-1К (virtual) | `PKCS11.Virtual.EKeyAlmaz1C.dll` | `0x80420031` |
-| Avest CC-337 / SecureToken-338 | `Av337CryptokiD.dll` | `0x00000352` |
-| Avest AvestKey / EfitKey | `avcryptokinxt.dll` | `0x00000352` |
+| Автор (Avest) CC-337 / SecureToken-338 | `Av337CryptokiD.dll` | `0x00000352` |
+| Автор (Avest) AvestKey / EfitKey | `avcryptokinxt.dll` | `0x00000352` |
+
+> Вендора SecureToken-337/338 у різних джерелах називають **Автор (Avtor)**
+> або **Avest / AvestUA** — це те саме апаратне забезпечення.
 
 Backend `pkcs11` авто-визначає правильний DSTU 4145 mechanism для кожного
 вендора. Передай `--module` з потрібним DLL, напр. для ST-338:
