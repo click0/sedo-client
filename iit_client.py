@@ -497,11 +497,8 @@ class IITClient:
 
 def main():
     import argparse
-    for _s in (sys.stdout, sys.stderr):
-        try:
-            _s.reconfigure(encoding="utf-8", errors="replace")
-        except (AttributeError, ValueError):
-            pass
+    from _console import force_utf8_io
+    force_utf8_io()
     parser = argparse.ArgumentParser(description="IIT Agent client")
     parser.add_argument("--discover", action="store_true", help="Find agent and print info")
     parser.add_argument("--host", default="127.0.0.1")

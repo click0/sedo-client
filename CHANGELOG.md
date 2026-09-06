@@ -39,6 +39,26 @@ License:  BSD 3-Clause "New" or "Revised" License
   (profile moderate), локальний прогін verify-play з тестовою структурою
   каталогів.
 
+### Тести
+
+- **`_console.py`** — єдина реалізація `force_utf8_io()`; чотири inline-копії
+  циклу `reconfigure` (`sedo_client`, `opensc_signer`, `pkcs11_signer`,
+  `iit_client`, `scripts/smoke_test`) замінено викликом. Модуль додано в
+  `pyproject` `py-modules` і hidden-imports PyInstaller; регресійний тест
+  забороняє нові inline-копії.
+- Тавтологічний `assert … or True` з локальним argparse замінено перевіркою
+  **реального** `_build_parser()` для всіх п'яти backend.
+- `test_explicit_virtual_raises_without_dll` проходив з хибної причини
+  (PyKCS11 відсутній) — тепер через `fake_pykcs11` перевіряє саме відсутню DLL;
+  + тест на відсутній `--key-file`.
+- `test_explicit_iit_agent_raises_without_agent` робив **живий** мережевий I/O
+  (до 16 проб портів × 1 с) — discovery замокано, `probe_port` не викликається.
+- `hasattr(signer, "login")` → `client.signer is signer`.
+- Нове покриття (`tests/test_coverage_gaps.py`): `discover_agent` (реєстр
+  HTTP/HTTPS, fallback HTTP→HTTPS на кожен порт, нічого не знайдено),
+  `auto_discover`, guard-и `sign_data`/`sign_hash` (None, невалідний base64),
+  `pick_sign_mechanism` (порядок, порожній, str-ID). Разом 182 тести.
+
 ## v0.29 — 2026-09-06
 
 Реліз за результатами трьох паралельних аудитів v0.28.1 (ядро Python /

@@ -37,6 +37,7 @@ addopts = "-v --tb=short"
 
 [tool.setuptools]
 py-modules = [
+    "_console",
     "sedo_client",
     "iit_client",
     "opensc_signer",

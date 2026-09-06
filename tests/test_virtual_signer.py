@@ -81,17 +81,22 @@ class TestDetectDSTU4145:
 
 
 class TestCLIBackendChoices:
-    def test_backend_accepts_virtual(self):
-        """argparse includes 'virtual' as a valid backend choice."""
-        import argparse
-        import sedo_client
-        # Rebuild the parser from main() — cheapest way is to invoke parse_args
-        # with a small, non-destructive arg set.
-        parser = argparse.ArgumentParser()
-        parser.add_argument("--backend",
-                            choices=["auto", "opensc", "pkcs11",
-                                     "virtual", "iit_agent"])
-        args = parser.parse_args(["--backend", "virtual"])
-        assert args.backend == "virtual"
-        # Sanity: the module really does expose virtual as a backend option.
-        assert "virtual" in sedo_client.__doc__ or True  # doc may not mention it
+    """Check the REAL parser (sedo_client._build_parser), not a local copy."""
+
+    @pytest.mark.parametrize("backend",
+                             ["auto", "opensc", "pkcs11", "virtual", "iit_agent"])
+    def test_real_parser_accepts_backend(self, backend):
+        from sedo_client import _build_parser
+        assert _build_parser().parse_args(["--backend", backend]).backend == backend
+
+    def test_real_parser_rejects_unknown_backend(self):
+        from sedo_client import _build_parser
+        with pytest.raises(SystemExit):
+            _build_parser().parse_args(["--backend", "bogus"])
+
+    def test_key_file_help_is_honest(self):
+        """--key-file only validates; help must not promise the DLL loads it."""
+        from sedo_client import _build_parser
+        help_text = _build_parser().format_help()
+        assert "--key-file" in help_text
+        assert "valid" in help_text.lower()

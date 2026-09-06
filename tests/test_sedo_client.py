@@ -44,21 +44,40 @@ class TestPickBackend:
         with pytest.raises(ValueError, match="--module"):
             SEDOClient(backend="opensc", module_path=None)
 
-    @patch("sedo_client.SEDOClient._pick_backend", return_value=FakeSigner())
-    def test_auto_returns_signer(self, mock_pick):
-        """auto backend returns whatever _pick_backend resolves."""
-        client = SEDOClient(backend="auto")
-        assert hasattr(client.signer, "login")
+    def test_auto_returns_signer(self):
+        """auto backend returns exactly the object _pick_backend resolves."""
+        signer = FakeSigner()
+        with patch("sedo_client.SEDOClient._pick_backend",
+                   return_value=signer) as pick:
+            client = SEDOClient(backend="auto")
+        assert client.signer is signer
+        pick.assert_called_once_with("auto", None, None)
 
-    def test_explicit_virtual_raises_without_dll(self):
-        """virtual backend raises if DLL not found."""
-        with pytest.raises(Exception):
+    def test_explicit_virtual_raises_without_dll(self, fake_pykcs11, tmp_path):
+        """virtual backend raises because the DLL is missing — not because
+        PyKCS11 is absent (fake_pykcs11 makes the import succeed)."""
+        key = tmp_path / "Key-6.dat"
+        key.write_bytes(b"key")
+        with pytest.raises(FileNotFoundError, match="Virtual PKCS#11 module"):
+            SEDOClient(backend="virtual", module_path="/nonexistent.dll",
+                       key_file=str(key))
+
+    def test_explicit_virtual_raises_without_key_file(self, fake_pykcs11,
+                                                       monkeypatch):
+        """No --key-file and no Key-6.dat anywhere → explicit error."""
+        monkeypatch.setattr(SEDOClient, "_find_key_file", staticmethod(lambda: None))
+        with pytest.raises(FileNotFoundError, match="requires --key-file"):
             SEDOClient(backend="virtual", module_path="/nonexistent.dll")
 
     def test_explicit_iit_agent_raises_without_agent(self):
-        """iit_agent raises if agent not running."""
-        with pytest.raises(RuntimeError, match="No working backend"):
-            SEDOClient(backend="iit_agent")
+        """iit_agent raises if agent not running — with discovery mocked, so
+        the test never probes real localhost ports."""
+        with patch("iit_client.discover_agent", return_value=None) as disc, \
+             patch("iit_client.probe_port") as probe:
+            with pytest.raises(RuntimeError, match="No working backend"):
+                SEDOClient(backend="iit_agent")
+        disc.assert_called_once()
+        probe.assert_not_called()
 
 
 # ─── _find_key_file ─────────────────────────────────────────
