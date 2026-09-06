@@ -35,7 +35,7 @@ OpenSC тут — **універсальний клієнт**, IIT DLL — **а�
 ## Швидка перевірка (без PIN)
 
 ```powershell
-$DLL = "C:\Program Files (x86)\Institute of Informational Technologies\ЄвроЗнак\PKCS11_EKeyAlmaz1C.dll"
+$DLL = "C:\Program Files (x86)\Institute of Informational Technologies\EKeys\Almaz1C\PKCS11.EKeyAlmaz1C.dll"
 $TOOL = "C:\Program Files\OpenSC Project\OpenSC\tools\pkcs11-tool.exe"
 
 # Reader (це OpenSC вміє — через PC/SC, без драйвера картки)
@@ -49,7 +49,9 @@ $TOOL = "C:\Program Files\OpenSC Project\OpenSC\tools\pkcs11-tool.exe"
 & $TOOL --module $DLL --list-slots
 # Очікуємо: Slot 0: label=E.key_Almaz-1C_Slot
 
-# ⭐ Механізми — підтвердить 0x80420014
+# ⭐ Механізми — має показати 0x80420031 (DSTU 4145 sign, EC F_2M).
+#    ⚠️ 0x80420014 — це симетричний MAC, НЕ підпис: кожна спроба підписати
+#    ним спалює одну з 15 PIN-спроб Алмаз-1К.
 & $TOOL --module $DLL --list-mechanisms
 ```
 
@@ -76,7 +78,7 @@ certutil -dump cert.der
 
 # Спочатку спробувати IIT vendor mechanism
 & $TOOL --module $DLL --login --pin XXXX `
-    --sign --mechanism 0x80420014 `
+    --sign --mechanism 0x80420031 `
     --input-file data.txt --output-file sig.bin
 
 # Якщо не спрацювало — стандартний CKM_DSTU4145
@@ -97,17 +99,22 @@ certutil -dump cert.der
 
 ## Використання в sedo-client
 
-Три backend на вибір:
+Чотири backend на вибір (`--backend auto` = opensc → pkcs11 → virtual → iit_agent):
 
 ```powershell
 # OpenSC (subprocess до pkcs11-tool) — простий, не потребує PyKCS11
 python sedo_client.py --backend opensc `
-    --module "C:\...\PKCS11_EKeyAlmaz1C.dll" `
+    --module "C:\...\EKeys\Almaz1C\PKCS11.EKeyAlmaz1C.dll" `
     --pin XXXX --fetch
 
 # PyKCS11 (Python binding) — швидше
 python sedo_client.py --backend pkcs11 `
-    --module "C:\...\PKCS11_EKeyAlmaz1C.dll" `
+    --module "C:\...\EKeys\Almaz1C\PKCS11.EKeyAlmaz1C.dll" `
+    --pin XXXX --fetch
+
+# Virtual token (PyKCS11 + PKCS11.Virtual.EKeyAlmaz1C.dll + Key-6.dat) — без USB
+python sedo_client.py --backend virtual `
+    --module "C:\...\EKeys\Almaz1C\PKCS11.Virtual.EKeyAlmaz1C.dll" `
     --pin XXXX --fetch
 
 # IIT Agent (JSON-RPC) — fallback
@@ -130,7 +137,7 @@ python sedo_client.py --backend iit_agent --pin XXXX --fetch
 # Повна сесія валідації Алмаз-1К + IIT PKCS#11
 # ═══════════════════════════════════════════════════════════════
 
-$DLL  = "C:\Program Files (x86)\Institute of Informational Technologies\ЄвроЗнак\PKCS11_EKeyAlmaz1C.dll"
+$DLL  = "C:\Program Files (x86)\Institute of Informational Technologies\EKeys\Almaz1C\PKCS11.EKeyAlmaz1C.dll"
 $PATH = "C:\Program Files\OpenSC Project\OpenSC\tools"
 $PIN  = Read-Host "PIN" -AsSecureString |
         ConvertFrom-SecureString -AsPlainText
@@ -148,7 +155,7 @@ $PIN  = Read-Host "PIN" -AsSecureString |
 & "$PATH\pkcs11-tool.exe" --module $DLL --list-mechanisms
 
 # ❗ ТОЧКА НЕПОВЕРНЕННЯ — з цього моменту використовуємо PIN
-# Збережіть reference значення показу mechanisms для 0x80420014
+# Збережіть reference значення показу mechanisms для 0x80420031
 
 # 5. Об'єкти
 & "$PATH\pkcs11-tool.exe" --module $DLL --login --pin $PIN --list-objects
@@ -160,7 +167,7 @@ $PIN  = Read-Host "PIN" -AsSecureString |
 # 7. Підпис (ONLY щоб підтвердити що ключ реально працює)
 "validation" | Out-File -FilePath val.txt -Encoding ASCII -NoNewline
 & "$PATH\pkcs11-tool.exe" --module $DLL --login --pin $PIN `
-    --sign --mechanism 0x80420014 `
+    --sign --mechanism 0x80420031 `
     --input-file val.txt --output-file val.sig
 
 # Успіх якщо:

@@ -9,7 +9,7 @@
 Author:   Vladyslav V. Prodan
 Contact:  github.com/click0
 Phone:    +38(099)6053340
-Version:  0.28.1
+Version:  0.29
 License:  BSD 3-Clause "New" or "Revised" License
 Year:     2025-2026
 ```
@@ -210,7 +210,7 @@ sedo-client/
 ```bash
 pip install pytest requests
 python -m pytest tests/ -v
-# 90 passed
+# 151 passed
 ```
 
 ## CI
@@ -237,12 +237,17 @@ python -m pytest tests/ -v
 Виконується все, крім фінального кроку "Create GitHub Release"; файли й
 checksums вивантажуються як артефакт `release-bundle` для перевірки.
 
-Щоб зробити реліз:
+Щоб зробити реліз: підняти версію + `CHANGELOG.md`, змерджити в `main`, далі
+або запушити тег:
 
 ```bash
-git tag v0.28.1
-git push origin v0.28.1
+git tag v0.29
+git push origin v0.29
 ```
+
+або через веб: *Releases → Draft a new release → Choose a tag → ввести
+`v0.29` → Create new tag on publish* (target `main`). Поява тега запускає
+`release.yml`, який сам заповнює нотатки й додає файли.
 
 ## Пов'язані проекти
 
