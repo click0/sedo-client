@@ -182,9 +182,9 @@ sedo-client/
 ├── .github/workflows/
 │   ├── tests.yml               — pytest на push / PR (3.11, 3.12)
 │   ├── spellcheck.yml          — cspell на push / PR
-│   ├── release.yml             — архіви + checksums на тег v*
-│   ├── build-windows.yml       — Windows .exe на тег v*
-│   └── build-unix.yml          — Linux + FreeBSD бінарники на тег v*
+│   ├── release.yml             — тег v*: тести → збірки → один GitHub Release
+│   ├── build-windows.yml       — reusable: Windows .exe (викликає release.yml)
+│   └── build-unix.yml          — reusable: Linux + FreeBSD бінарники
 ├── .cspell.json
 ├── README.md                   — English
 ├── README_uk.md                — цей файл (українська)
@@ -224,10 +224,18 @@ python -m pytest tests/ -v
 
 На тег `v*`:
 
-- **Release** (`release.yml`) — тести, витяг секції з `CHANGELOG.md`, пакування
-  `tar.gz` + `zip` + SHA256 checksums, публікація GitHub Release
-- **build-windows.yml** — standalone `.exe` (PyInstaller)
-- **build-unix.yml** — Linux ELF + FreeBSD ELF
+- **Release** (`release.yml`) — єдиний воркфлоу, що публікує. Запускає тести,
+  викликає `build-windows.yml` та `build-unix.yml` як reusable-воркфлоу,
+  завантажує три бінарники, пакує `tar.gz` + `zip`, пише один
+  `sha256sums.txt` на **архіви і бінарники**, витягує секцію з
+  `CHANGELOG.md` і створює **один** GitHub Release з усіма файлами.
+  `concurrency`-група серіалізує запуски на один тег.
+- **build-windows.yml** — standalone `.exe` (PyInstaller), `workflow_call`
+- **build-unix.yml** — Linux ELF + FreeBSD ELF, `workflow_call`
+
+Сухий прогін без тега: *Actions → Release → Run workflow* на будь-якій гілці.
+Виконується все, крім фінального кроку "Create GitHub Release"; файли й
+checksums вивантажуються як артефакт `release-bundle` для перевірки.
 
 Щоб зробити реліз:
 

@@ -182,9 +182,9 @@ sedo-client/
 ├── .github/workflows/
 │   ├── tests.yml               — pytest on push / PR (3.11, 3.12)
 │   ├── spellcheck.yml          — cspell on push / PR
-│   ├── release.yml             — source archives + checksums on v* tags
-│   ├── build-windows.yml       — Windows .exe on v* tags
-│   └── build-unix.yml          — Linux + FreeBSD binaries on v* tags
+│   ├── release.yml             — v* tag: tests → builds → one GitHub Release
+│   ├── build-windows.yml       — reusable: Windows .exe (called by release.yml)
+│   └── build-unix.yml          — reusable: Linux + FreeBSD binaries
 ├── .cspell.json
 ├── README.md                   — this file (English)
 ├── README_uk.md                — Ukrainian version
@@ -224,11 +224,18 @@ On every push / pull request to `main`:
 
 On a `v*` tag:
 
-- **Release** (`release.yml`) — runs tests, extracts the matching
-  `CHANGELOG.md` section, packages `tar.gz` + `zip` + SHA256 checksums,
-  publishes a GitHub Release
-- **build-windows.yml** — standalone `.exe` (PyInstaller)
-- **build-unix.yml** — Linux ELF + FreeBSD ELF
+- **Release** (`release.yml`) — the only workflow that publishes. It runs
+  tests, calls `build-windows.yml` and `build-unix.yml` as reusable
+  workflows, downloads the three binaries, packages `tar.gz` + `zip`,
+  writes a single `sha256sums.txt` covering **archives and binaries**,
+  extracts the matching `CHANGELOG.md` section and creates **one** GitHub
+  Release with all assets. A `concurrency` group serialises runs per tag.
+- **build-windows.yml** — standalone `.exe` (PyInstaller), `workflow_call`
+- **build-unix.yml** — Linux ELF + FreeBSD ELF, `workflow_call`
+
+Dry-run without a tag: *Actions → Release → Run workflow* on any branch.
+Everything runs except the final "Create GitHub Release" step; the assets
+and checksums are uploaded as the `release-bundle` artifact for inspection.
 
 To cut a release:
 

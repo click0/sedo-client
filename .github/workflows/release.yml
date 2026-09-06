@@ -1,20 +1,37 @@
 name: Release
 
+# One pipeline per v* tag:
+#   test ─┐
+#   build-unix (linux + freebsd) ─┼─▶ publish (archives + sha256sums + ONE release)
+#   build-windows ────────────────┘
+#
+# Previously release.yml, build-windows.yml and build-unix.yml each ran on the
+# tag and each called action-gh-release on the same tag (4 racing calls), and
+# the checksums file covered only the source archives. Now the build workflows
+# are reusable (workflow_call) and never publish; this file is the only place
+# a release is created, with a single sha256sums.txt over every asset.
+#
+# workflow_dispatch = dry-run on a branch: everything runs (builds, archives,
+# checksums, uploaded as an artifact) except the final "Create GitHub Release".
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 permissions:
   contents: write
 
+# One release pipeline per ref at a time; never cancel a running publish.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  release:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
@@ -29,9 +46,28 @@ jobs:
       - name: Run tests
         run: python -m pytest tests/ -v
 
-      - name: Extract version from tag
+  build-unix:
+    uses: ./.github/workflows/build-unix.yml
+
+  build-windows:
+    uses: ./.github/workflows/build-windows.yml
+
+  publish:
+    runs-on: ubuntu-latest
+    needs: [test, build-unix, build-windows]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine version
         id: version
-        run: echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=dev-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Extract release notes from CHANGELOG
         id: notes
@@ -49,32 +85,51 @@ jobs:
           echo "--- release_notes.md ---"
           cat release_notes.md
 
-      - name: Create source archive
+      - name: Download built binaries
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: sedo-client-*
+          path: dist
+          merge-multiple: true
+
+      - name: Create source archives
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           git archive --format=tar.gz --prefix="sedo-client-${VERSION}/" \
-            -o "sedo-client-${VERSION}.tar.gz" HEAD
+            -o "dist/sedo-client-${VERSION}.tar.gz" HEAD
           git archive --format=zip --prefix="sedo-client-${VERSION}/" \
-            -o "sedo-client-${VERSION}.zip" HEAD
+            -o "dist/sedo-client-${VERSION}.zip" HEAD
 
-      - name: Generate SHA256 checksums
+      - name: Generate SHA256 checksums (archives + binaries)
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          sha256sum \
-            "sedo-client-${VERSION}.tar.gz" \
-            "sedo-client-${VERSION}.zip" \
-            > "sedo-client-${VERSION}.sha256sums.txt"
+          cd dist
+          # Every asset that will be attached to the release, in one file.
+          sha256sum sedo-client-* > "sedo-client-${VERSION}.sha256sums.txt"
+          echo "--- assets ---"
+          ls -l
           echo "--- checksums ---"
           cat "sedo-client-${VERSION}.sha256sums.txt"
+          # Expect 3 binaries + 2 archives — fail loudly if a build vanished.
+          COUNT=$(grep -c . "sedo-client-${VERSION}.sha256sums.txt")
+          if [ "$COUNT" -ne 5 ]; then
+            echo "::error::expected 5 assets in sha256sums.txt, got $COUNT"
+            exit 1
+          fi
+
+      - name: Upload release bundle (dry-run inspection)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-bundle
+          path: dist/
+          if-no-files-found: error
 
       - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           name: "sedo-client v${{ steps.version.outputs.version }}"
           body_path: release_notes.md
           draft: false
           prerelease: false
-          files: |
-            sedo-client-${{ steps.version.outputs.version }}.tar.gz
-            sedo-client-${{ steps.version.outputs.version }}.zip
-            sedo-client-${{ steps.version.outputs.version }}.sha256sums.txt
+          files: dist/sedo-client-*
