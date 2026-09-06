@@ -68,7 +68,7 @@ Windows worker
     │                                    ▼
     │                         IIT "Користувач ЦСК" (GUI running)
     │
-    └── PKCS11.EKeyAlmaz1C.dll + CSPBase.dll + CSPExtension.dll + *.cap
+    └── PKCS11.EKeyAlmaz1C.dll + CSPBase.dll + CSPExtension.dll + PKIFormats.dll + *.cap
             │
             ▼ WinSCard (PC/SC)
         Almaz-1K USB
@@ -217,8 +217,9 @@ python -m pytest tests/ -v
 
 On every push / pull request to `main`:
 
-- **Tests** (`tests.yml`) — `pytest` on Python 3.11 and 3.12, plus a
-  build-and-install check (`pip install .`, run `sedo-client --help`)
+- **Tests** (`tests.yml`) — `pytest` on Python 3.11, 3.12 and 3.13, plus a
+  packaging check (`python -m build --wheel`, `pip install dist/*.whl`,
+  run `sedo-client --help`)
 - **Spellcheck** (`spellcheck.yml`) — `cspell`; Cyrillic ignored via a regex
   in `.cspell.json`, whitelist covers project jargon (DSTU, PKCS, IIT, …)
 
@@ -338,5 +339,5 @@ Our project is the only publicly available tool that covers all of:
 
 - SEDO Armed Forces (`sedo.mod.gov.ua`) login automation
 - Ansible playbook ↔ Windows worker ↔ Almaz-1K integration
-- Three-backend architecture (opensc / pkcs11 / iit_agent)
+- Four-backend architecture (opensc / pkcs11 / virtual / iit_agent)
 - The full cycle: login → fetch → verify → Telegram report

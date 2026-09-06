@@ -16,7 +16,10 @@ Year:     2025-2026
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** — загальний огляд архітектури,
   data flow, розподіл відповідальностей Linux ↔ Windows
 - **[MINIMUM-FILES-LIST.md](MINIMUM-FILES-LIST.md)** — точний перелік файлів
-  для деплою (3 DLL + 9 cap = 4.1 MB)
+  для деплою (HW: 4 DLL + 9 cap ≈ 5 MB; Virtual: ще 5 DLL + Key-6.dat)
+- **[LINUX-WINE-DEPLOYMENT.md](LINUX-WINE-DEPLOYMENT.md)** — запуск без
+  Windows: 32-bit Wine prefix, virtual token (Key-6.dat), playbook
+  `sedo_daily_linux.yml`
 
 ### Реверс-інжиніринг
 

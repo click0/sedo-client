@@ -59,6 +59,33 @@ License:  BSD 3-Clause "New" or "Revised" License
   `auto_discover`, guard-и `sign_data`/`sign_hash` (None, невалідний base64),
   `pick_sign_mechanism` (порядок, порожній, str-ID). Разом 182 тести.
 
+### Документація
+
+- README (обидві мови): «трибекендна» → **чотирибекендна** архітектура
+  (opensc / pkcs11 / virtual / iit_agent); у діаграмі й у
+  `docs/ARCHITECTURE.md` додано `virtual_signer.py` та обов'язкову
+  `PKIFormats.dll`; секція CI описує, що робить `tests.yml` насправді
+  (wheel → install → `sedo-client --help`).
+- `docs/ARCHITECTURE.md` «Вибір backend»: додано `virtual`, порядок `auto`
+  відповідає коду.
+- `docs/MINIMUM-FILES-LIST.md`: підсумки узгоджено (4 DLL ≈ 2.5 MB + 9 cap
+  ≈ 2.5 MB ≈ 5 MB), Scenario B більше не «все з A» (HW entry point не
+  потрібен), шлях у Verification → `C:\sedo-client\libs`.
+- `docs/README.md`: правильні цифри для MINIMUM-FILES; додано посилання на
+  `LINUX-WINE-DEPLOYMENT.md` (раніше не був злінкований з жодного індексу).
+- `docs/MECHANISM-IDS.md`: `efitkeynxt.dll` → `0x00000352` (код мапить
+  `efitkey` на вендора «Автор (Avest)»), додано рядок `Av337CryptokiD.dll`.
+- `SETUP-WINDOWS.md`: `PKIFormats.dll` у переліку DLL кроку 3 і в
+  troubleshooting.
+- `requirements.txt` — лише `requests` (pytest/PyKCS11 — через extras
+  `pyproject`), із поясненням; раніше жорстко пінив PyKCS11, якого
+  жоден воркфлоу не ставить.
+
+### CI
+
+- `tests.yml`: матриця Python 3.11 / 3.12 / **3.13** (`requires-python
+  >= 3.11`).
+
 ## v0.29 — 2026-09-06
 
 Реліз за результатами трьох паралельних аудитів v0.28.1 (ядро Python /
