@@ -10,6 +10,7 @@ Year:     2025-2026
 """
 
 import base64
+import binascii
 import logging
 import os
 import re
@@ -238,10 +239,15 @@ class SEDOClient:
 
                 log.info("Got challenge (%d %s)", len(challenge),
                          "chars" if isinstance(challenge, str) else "bytes")
-                challenge_bytes = (
-                    base64.b64decode(challenge) if isinstance(challenge, str)
-                    else challenge
-                )
+                if isinstance(challenge, str):
+                    # Strict decode: a plaintext nonce is NOT valid base64 and
+                    # must be signed as-is, not silently mangled by b64decode.
+                    try:
+                        challenge_bytes = base64.b64decode(challenge, validate=True)
+                    except (binascii.Error, ValueError):
+                        challenge_bytes = challenge.encode()
+                else:
+                    challenge_bytes = challenge
 
                 signature = self.signer.sign(challenge_bytes)
 
@@ -252,7 +258,13 @@ class SEDOClient:
                     "certificate": base64.b64encode(cert).decode(),
                     "session_id": data.get("session_id") or data.get("id"),
                 }, timeout=10)
-                return r2.ok
+                if r2.ok:
+                    return True
+                # Verify failed on this guessed endpoint — keep probing the
+                # remaining candidates instead of aborting on the first 200/init.
+                log.debug("verify failed for %s: HTTP %s", verify_url,
+                          getattr(r2, "status_code", "?"))
+                continue
             except (requests.RequestException, ValueError):
                 continue
         return False
@@ -316,14 +328,33 @@ class IITAgentAdapter:
             raise RuntimeError("No certificates bound to private key")
         cert_info = self._c.get_own_certificate(0)
         # get_own_certificate повертає DER у полі 'data' (hex) — див. docs/PROTOCOL-JSON-RPC.md
+        # Guard the envelope: None/str would raise TypeError on `in`/subscript.
+        if not isinstance(cert_info, dict):
+            raise RuntimeError(
+                f"Unexpected GetOwnCertificate result: {type(cert_info).__name__}"
+            )
         if "data" in cert_info:
-            self._cert_bytes = bytes.fromhex(cert_info["data"])
+            self._cert_bytes = self._decode_cert(cert_info["data"])
         elif "certificate" in cert_info:
-            self._cert_bytes = base64.b64decode(cert_info["certificate"])
+            self._cert_bytes = self._decode_cert(cert_info["certificate"])
         else:
             raise RuntimeError(
                 f"Unknown cert envelope; keys: {list(cert_info.keys())}"
             )
+
+    @staticmethod
+    def _decode_cert(value) -> bytes:
+        """DER may arrive as hex or base64 — try hex first, then strict base64."""
+        if not isinstance(value, str):
+            raise RuntimeError(f"Certificate field is not a string: {type(value).__name__}")
+        try:
+            return bytes.fromhex(value)
+        except ValueError:
+            pass
+        try:
+            return base64.b64decode(value, validate=True)
+        except (binascii.Error, ValueError) as e:
+            raise RuntimeError(f"Certificate is neither hex nor base64: {e}") from e
 
     def get_certificate(self) -> bytes:
         if self._cert_bytes is None:
@@ -331,10 +362,18 @@ class IITAgentAdapter:
         return self._cert_bytes
 
     def sign(self, data: bytes) -> bytes:
+        if self._cert_bytes is None:
+            raise RuntimeError("Not logged in")
         return self._c.sign_data(data)
 
     def logout(self):
-        self._c.finalize()
+        # Never let teardown raise: a lost agent here would mask the real
+        # error raised inside the with-block (see finalize()).
+        from iit_client import IITError
+        try:
+            self._c.finalize()
+        except IITError as e:
+            log.warning("IIT agent finalize failed (ignored): %s", e)
 
 
 # ═══════════════════════════════════════════════════════════════

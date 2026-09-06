@@ -19,7 +19,7 @@ __all__ = [
     "IIT_MECHANISMS", "MECHANISM_SUPPORT", "CKM_IIT_DSTU4145",
     "CKM_IIT_DSTU4145_ALT", "CKM_DSTU4145", "is_supported",
     "detect_dstu4145_mechanism", "DSTU4145_SIGN_MECHANISMS",
-    "pick_sign_mechanism", "detect_token_vendor",
+    "pick_sign_mechanism", "choose_sign_mechanism", "detect_token_vendor",
 ]
 
 # 32 bytes  = 256-bit symmetric key (Kalyna/Kupyna/ГОСТ)
@@ -164,3 +164,26 @@ def pick_sign_mechanism(available_ids) -> "int | None":
         if mech in available:
             return mech
     return None
+
+
+def choose_sign_mechanism(signing_ids) -> int:
+    """
+    Єдина політика вибору sign-механізму для обох PyKCS11 backend-ів
+    (pkcs11_signer, virtual_signer). Приймає ID, що вже мають CKF_SIGN.
+
+    1. Відомий DSTU 4145 ID (IIT 0x80420031/32 або стандарт 0x00000352).
+    2. Перший vendor-defined (>= 0x80000000) — нові IIT-токени.
+    3. Перший зі списку — останній fallback.
+
+    Кидає ValueError, якщо список порожній.
+    """
+    ids = [int(m) for m in signing_ids]
+    if not ids:
+        raise ValueError("no signing mechanisms available")
+    known = pick_sign_mechanism(ids)
+    if known is not None:
+        return known
+    for mech in ids:
+        if mech >= 0x80000000:
+            return mech
+    return ids[0]
