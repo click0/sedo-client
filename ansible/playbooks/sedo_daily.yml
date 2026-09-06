@@ -1,6 +1,11 @@
 ---
 # Щоденна перевірка СЕДО ЗСУ (sedo.mod.gov.ua)
-# Використовує PKCS#11 backend (PKCS11_EKeyAlmaz1C.dll)
+# Windows-воркер з апаратним Алмаз-1К, PKCS#11 backend.
+#
+# PIN передається клієнту через змінну середовища SEDO_PIN (sedo_client.py:
+# --pin → SEDO_PIN → getpass), тож він не потрапляє у командний рядок і
+# список процесів. no_log лишається на самому запуску як захист у глибину;
+# rc/stdout/stderr показуються окремим task-ом при провалі — там PIN нема.
 
 - name: СЕДО ЗСУ — щоденна перевірка
   hosts: sedo_workers
@@ -11,7 +16,13 @@
   vars:
     date_today: "{{ ansible_date_time.date }}"
     output_dir: "{{ client_path }}\\downloads\\{{ date_today }}"
-    pkcs11_module: "{{ client_path }}\\libs\\PKCS11_EKeyAlmaz1C.dll"
+    report_root: /opt/sedo-reports
+    # Інсталер IIT кладе DLL з крапкою (PKCS11.EKeyAlmaz1C.dll, див.
+    # docs/MINIMUM-FILES-LIST.md); старі копії/інструкції — з підкресленням.
+    # Приймаємо обидві назви, перша знайдена — переможець.
+    pkcs11_module_candidates:
+      - "{{ client_path }}\\libs\\PKCS11.EKeyAlmaz1C.dll"
+      - "{{ client_path }}\\libs\\PKCS11_EKeyAlmaz1C.dll"
 
   tasks:
     - name: Перевірка Windows Smart Card service
@@ -20,15 +31,24 @@
         state: started
         start_mode: auto
 
-    - name: Перевірка що PKCS#11 модуль доступний
+    - name: Пошук PKCS#11 модуля (обидві назви DLL)
       ansible.windows.win_stat:
-        path: "{{ pkcs11_module }}"
+        path: "{{ item }}"
+      loop: "{{ pkcs11_module_candidates }}"
       register: pkcs11_check
+
+    - name: Обрати перший знайдений PKCS#11 модуль
+      ansible.builtin.set_fact:
+        pkcs11_module: >-
+          {{ (pkcs11_check.results | selectattr('stat.exists')
+              | map(attribute='item') | list + ['']) | first }}
 
     - name: Зупинити якщо DLL відсутня
       ansible.builtin.fail:
-        msg: "PKCS11_EKeyAlmaz1C.dll не знайдено в {{ pkcs11_module }}"
-      when: not pkcs11_check.stat.exists
+        msg: >-
+          PKCS#11 модуль не знайдено. Перевірено:
+          {{ pkcs11_module_candidates | join(', ') }}
+      when: pkcs11_module == ''
 
     - name: Перевірка Алмаз
       ansible.windows.win_shell: |
@@ -55,14 +75,29 @@
           --url "{{ sedo_url }}"
           --backend pkcs11
           --module "{{ pkcs11_module }}"
-          --pin "{{ almaz_pins[inventory_hostname] }}"
           --fetch
           --since "{{ date_today }}"
           --output "{{ output_dir }}"
+      environment:
+        SEDO_PIN: "{{ almaz_pins[inventory_hostname] }}"
       no_log: true
       register: sedo_result
-      changed_when: sedo_result.rc == 0
-      failed_when: sedo_result.rc != 0
+      failed_when: false
+      # "changed" лише коли реально щось завантажено, а не на кожен rc==0.
+      changed_when: "sedo_result.stdout is search('Документів: [1-9]')"
+
+    - name: Діагностика клієнта при провалі (rc / stdout / stderr, без PIN)
+      ansible.builtin.debug:
+        msg:
+          rc: "{{ sedo_result.rc }}"
+          stdout: "{{ sedo_result.stdout | default('') }}"
+          stderr: "{{ sedo_result.stderr | default('') }}"
+      when: sedo_result.rc != 0
+
+    - name: Зупинити якщо клієнт завершився з помилкою
+      ansible.builtin.fail:
+        msg: "sedo-client завершився з rc={{ sedo_result.rc }} — див. діагностику вище"
+      when: sedo_result.rc != 0
 
     - name: Знайти завантажені файли
       ansible.windows.win_find:
@@ -73,8 +108,8 @@
     - name: Fetch на Linux controller
       ansible.builtin.fetch:
         src: "{{ item.path }}"
-        dest: "/opt/sedo-reports/{{ inventory_hostname }}/{{ date_today }}/"
-        flat: yes
+        dest: "{{ report_root }}/{{ inventory_hostname }}/{{ date_today }}/"
+        flat: true
       loop: "{{ downloaded.files }}"
       when: downloaded.files | length > 0
 
@@ -83,22 +118,32 @@
   gather_facts: true
   vars:
     date_today: "{{ ansible_date_time.date }}"
+    report_root: /opt/sedo-reports
 
   tasks:
     - name: Знайти завантажені ZIP
       ansible.builtin.find:
-        paths: "/opt/sedo-reports"
+        paths: "{{ report_root }}"
         patterns: "*.zip"
         recurse: true
       register: zip_files
 
-    - name: ua-sign-verify на кожен
+    # Лише сьогоднішній каталог (<host>/<date>/*.zip) — інакше кожен запуск
+    # переверифікує всю історію, а results/ під verified/ росте без меж.
+    - name: Відібрати ZIP лише за сьогодні
+      ansible.builtin.set_fact:
+        todays_zips: >-
+          {{ zip_files.files | map(attribute='path')
+             | select('search', '/' ~ date_today ~ '/')
+             | reject('search', '/verified/') | list }}
+
+    - name: Запустити ua-sign-verify на кожен
       ansible.builtin.command:
         cmd: >
-          python3 /opt/ua-sign-verify/cli/main.py "{{ item.path }}"
-          --result-dir "/opt/sedo-reports/verified/{{ date_today }}"
+          python3 /opt/ua-sign-verify/cli/main.py "{{ item }}"
+          --result-dir "{{ report_root }}/verified/{{ date_today }}"
           --no-console
-      loop: "{{ zip_files.files }}"
+      loop: "{{ todays_zips }}"
       register: verify_results
       changed_when: false
       failed_when: false

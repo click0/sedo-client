@@ -245,6 +245,15 @@ $cert = New-SelfSignedCertificate -DnsName $env:COMPUTERNAME `
 New-Item -Path WSMan:\localhost\Listener `
     -Transport HTTPS -Address * -CertificateThumbPrint $cert.Thumbprint -Force
 
+# 8.2b Експорт сертифіката для controller-а. Inventory ставить
+#      ansible_winrm_server_cert_validation: validate — CredSSP передає
+#      доменні креденшели цим каналом, тож `ignore` відкрив би їх для MITM.
+Export-Certificate -Cert $cert -FilePath C:\ws01-winrm.cer
+certutil -encode C:\ws01-winrm.cer C:\ws01-winrm.pem
+# Скопіювати C:\ws01-winrm.pem на controller у /opt/sedo-client/certs/
+# і розкоментувати в inventory/hosts.yml:
+#   ansible_winrm_ca_trust_path: /opt/sedo-client/certs/ws01-winrm.pem
+
 # 8.3 Firewall
 New-NetFirewallRule -DisplayName "WinRM HTTPS" -Direction Inbound `
     -LocalPort 5986 -Protocol TCP -Action Allow
