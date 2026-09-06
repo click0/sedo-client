@@ -11,6 +11,11 @@ almaz_pins:
 virtual_pins:
   lin01: "ENTER_PIN_HERE"
 
+# WinRM password for ansible_user on each Windows worker
+# (referenced by hosts.yml: ansible_password)
+winrm_passwords:
+  ws01: "ENTER_WINRM_PASSWORD_HERE"
+
 telegram:
   bot_token: "1234567890:ABCDEF..."
   chat_id: "@your_channel_or_id"

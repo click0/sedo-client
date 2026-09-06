@@ -10,7 +10,6 @@ Year:     2025-2026
 """
 
 import logging
-import os
 import shutil
 import subprocess
 import tempfile
@@ -137,9 +136,10 @@ class OpenSCSigner:
         """Експорт сертифіката у DER-форматі."""
         if not self._pin:
             raise RuntimeError("PIN не встановлено")
-        # mkstemp закриває fd одразу — щоб pkcs11-tool на Windows міг відкрити файл на запис
-        fd, out_path = tempfile.mkstemp(suffix=".der")
-        os.close(fd)
+        # Private (0700) temp dir: no predictable path in a shared /tmp,
+        # so nothing can pre-create/symlink the output file.
+        tmp = tempfile.mkdtemp(prefix="sedo-cert-")
+        out_path = str(Path(tmp) / "cert.der")
         try:
             r = self._run([
                 "--login", "--pin", self._pin,
@@ -151,24 +151,20 @@ class OpenSCSigner:
                 raise RuntimeError(f"read-object failed: {stderr}")
             return Path(out_path).read_bytes()
         finally:
-            try:
-                Path(out_path).unlink()
-            except OSError:
-                pass
+            shutil.rmtree(tmp, ignore_errors=True)
 
     def sign(self, data: bytes) -> bytes:
         """Підпис даних через --sign."""
         if not self._pin:
             raise RuntimeError("PIN не встановлено")
 
-        fd, inp_path = tempfile.mkstemp()
+        # Both input and signature live inside a private (0700) temp dir —
+        # the old `inp_path + ".sig"` was a predictable, non-mkstemp path.
+        tmp = tempfile.mkdtemp(prefix="sedo-sign-")
+        inp_path = str(Path(tmp) / "data.bin")
+        out_path = str(Path(tmp) / "data.sig")
         try:
-            os.write(fd, data)
-        finally:
-            os.close(fd)
-        out_path = inp_path + ".sig"
-
-        try:
+            Path(inp_path).write_bytes(data)
             r = self._run([
                 "--login", "--pin", self._pin,
                 "--sign", "--mechanism", self._mechanism,
@@ -180,11 +176,7 @@ class OpenSCSigner:
                 raise RuntimeError(f"sign failed: {stderr}")
             return Path(out_path).read_bytes()
         finally:
-            for p in (inp_path, out_path):
-                try:
-                    Path(p).unlink()
-                except OSError:
-                    pass
+            shutil.rmtree(tmp, ignore_errors=True)
 
     def logout(self) -> None:
         """Очистити PIN з пам'яті."""
