@@ -17,6 +17,7 @@ import sys
 # Our own modules imported lazily inside SEDOClient._pick_backend /
 # find_sign_mechanism — invisible to PyInstaller static analysis.
 HIDDEN_MODULES = [
+    "_console",
     "opensc_signer",
     "pkcs11_signer",
     "virtual_signer",

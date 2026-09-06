@@ -102,11 +102,8 @@ def t_reg():
 
 def main():
     # UTF-8 stdout/stderr so emoji (✓ ✗ ⚠) don't crash on Windows cp1251/cp866.
-    for _s in (sys.stdout, sys.stderr):
-        try:
-            _s.reconfigure(encoding="utf-8", errors="replace")
-        except (AttributeError, ValueError):
-            pass
+    from _console import force_utf8_io
+    force_utf8_io()
 
     passed = failed = 0
     for name, fn in TESTS:

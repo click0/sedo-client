@@ -35,19 +35,9 @@ def _safe_doc_id(doc_id) -> str:
     return doc_id
 
 
-def force_utf8_io() -> None:
-    """
-    Ensure stdout/stderr can print emoji and Cyrillic on Windows consoles.
-
-    Ukrainian Windows uses cp866/cp1251 by default, where printing characters
-    like ✓ 📄 ❌ raises UnicodeEncodeError and crashes the program. Reconfigure
-    the streams to UTF-8 with replacement so output never crashes.
-    """
-    for stream in (sys.stdout, sys.stderr):
-        try:
-            stream.reconfigure(encoding="utf-8", errors="replace")
-        except (AttributeError, ValueError):
-            pass
+# Re-exported for backwards compatibility; the implementation lives in
+# _console.py and is shared by every CLI entry point.
+from _console import force_utf8_io  # noqa: E402
 
 
 __all__ = ["SEDOClient", "Signer", "SEDO_MOD_URL", "IITAgentAdapter",
