@@ -171,7 +171,7 @@ def read_eusigncp_config() -> dict:
     return config
 
 
-def probe_port(host: str = "127.0.0.1", port: int = 9100,
+def probe_port(host: str = "127.0.0.1", port: int = 8081,
                timeout: float = 1.0, use_https: bool = False) -> bool:
     """Перевіряє чи відповідає сервер на порту."""
     scheme = "https" if use_https else "http"
@@ -266,7 +266,7 @@ class IITClient:
         sig = client.sign_data(b"hello world")
     """
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 9100,
+    def __init__(self, host: str = "127.0.0.1", port: int = 8081,
                  use_https: bool = False, origin: str = "https://sedo.mod.gov.ua",
                  timeout: float = 30.0):
         self.host = host
@@ -373,14 +373,17 @@ class IITClient:
 
     def finalize(self) -> None:
         """Звільнити ресурси. Викликається ОСТАННЬОЮ."""
+        # Catch the whole IITError family: call() raises IITAgentNotFound on
+        # transport failure, not IITRPCError — a lost agent during teardown
+        # must not mask the original error raised from the with-block.
         try:
             self.call("ResetPrivateKey")
-        except IITRPCError:
-            pass
+        except IITError as e:
+            log.debug("ResetPrivateKey during finalize ignored: %s", e)
         try:
             self.call("Finalize")
-        except IITRPCError:
-            pass
+        except IITError as e:
+            log.debug("Finalize ignored: %s", e)
         self._initialized = False
         self._session_id = None
 

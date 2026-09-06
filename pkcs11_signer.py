@@ -204,7 +204,7 @@ class PKCS11Signer:
 
         Повертає numeric mechanism ID.
         """
-        from mechanism_ids import pick_sign_mechanism
+        from mechanism_ids import choose_sign_mechanism
 
         mechanisms = self.list_mechanisms()
         signing = [m for m in mechanisms if m["can_sign"]]
@@ -215,24 +215,14 @@ class PKCS11Signer:
         for m in signing:
             log.info("  %s  min=%d max=%d", m["hex"], m["min_key"], m["max_key"])
 
-        if prefer_dstu:
-            # 1. Відомий DSTU 4145 ID (працює і для IIT, і для Avest ST-338)
-            known = pick_sign_mechanism(m["id"] for m in signing)
-            if known is not None:
-                log.info("Selected known DSTU 4145 mechanism: 0x%08X", known)
-                return known
-
-            # 2. Будь-який vendor-defined
-            vendor = [m for m in signing if m["id"] >= 0x80000000]
-            if vendor:
-                mech = vendor[0]
-                log.info("Selected vendor mechanism: %s", mech["hex"])
-                return mech["id"]
-
-        # 3. Fallback — перший що вміє sign
-        mech = signing[0]
-        log.info("Selected mechanism: %s", mech["hex"])
-        return mech["id"]
+        if not prefer_dstu:
+            mech = signing[0]["id"]
+        else:
+            # Shared 3-tier policy (known DSTU → vendor → first) — the same
+            # helper VirtualSigner uses, so both backends behave identically.
+            mech = choose_sign_mechanism(m["id"] for m in signing)
+        log.info("Selected sign mechanism: 0x%08X", mech)
+        return mech
 
     # ─── Session ─────────────────────────────────────────────
 

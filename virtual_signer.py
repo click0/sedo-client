@@ -72,6 +72,24 @@ class VirtualSigner:
         if key_file and not Path(key_file).exists():
             raise FileNotFoundError(f"Key file not found: {key_file}")
 
+        # The virtual DLL does NOT take a key path: KM_FileSystem.dll resolves
+        # "%sKey-%X.dat" from a directory configured in the registry
+        # (...\Libraries\Sign\Path) / EUSetPrivateKeyMediaSettings — see
+        # docs/IIT-ANALYSIS-ADDENDUM-v6.md §2.3.3. So --key-file can only be
+        # validated here; warn loudly if it is not where the DLL will look.
+        if key_file:
+            key_dir = Path(key_file).resolve().parent
+            mod_dir = Path(module_path).resolve().parent
+            if key_dir != mod_dir:
+                log.warning(
+                    "--key-file %s is not next to the virtual module (%s). "
+                    "The DLL loads Key-N.dat from its registry-configured "
+                    "directory, not from this path — it may sign with a "
+                    "different key. Place the file in the module directory "
+                    "or set the registry Path accordingly.",
+                    key_file, mod_dir,
+                )
+
         self.module_path = module_path
         self.key_file = key_file
 
@@ -99,33 +117,26 @@ class VirtualSigner:
         Prefers a known DSTU 4145 ID (IIT 0x80420031/32 or standard
         0x00000352), then any vendor-defined (>= 0x80000000) with CKF_SIGN.
         """
-        from mechanism_ids import pick_sign_mechanism
+        from mechanism_ids import choose_sign_mechanism
 
         slots = self._pkcs11.getSlotList(tokenPresent=True)
         if not slots:
             raise RuntimeError("No virtual token slot")
         slot = slots[0]
 
-        mech_types = [int(mt) for mt in self._pkcs11.getMechanismList(slot)]
-
-        # 1. Known DSTU 4145 ID with sign capability
-        known = pick_sign_mechanism(mech_types)
-        if known is not None:
-            info = self._pkcs11.getMechanismInfo(slot, known)
-            if int(info.flags) & self._PyKCS11.CKF_SIGN:
-                log.info("Selected known DSTU 4145 mechanism: 0x%08X", known)
-                return known
-
-        # 2. Any vendor-defined signing mechanism
-        for mech_id in mech_types:
-            if mech_id < 0x80000000:
-                continue
-            info = self._pkcs11.getMechanismInfo(slot, mech_id)
-            if int(info.flags) & self._PyKCS11.CKF_SIGN:
-                log.info("Selected vendor sign mechanism: 0x%08X", mech_id)
-                return mech_id
-
-        raise RuntimeError("No signing mechanism found on virtual token")
+        # Same 3-tier policy as PKCS11Signer (known DSTU → vendor → first),
+        # applied to the mechanisms that actually carry CKF_SIGN.
+        signing = [
+            int(mt) for mt in self._pkcs11.getMechanismList(slot)
+            if int(self._pkcs11.getMechanismInfo(slot, int(mt)).flags)
+            & self._PyKCS11.CKF_SIGN
+        ]
+        try:
+            mech = choose_sign_mechanism(signing)
+        except ValueError:
+            raise RuntimeError("No signing mechanism found on virtual token")
+        log.info("Selected sign mechanism: 0x%08X", mech)
+        return mech
 
     def login(self, pin: str, slot: Optional[int] = None) -> None:
         from pkcs11_signer import check_almaz_mutex

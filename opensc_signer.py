@@ -52,7 +52,8 @@ class OpenSCSigner:
 
     def __init__(self, module_path: str,
                  mechanism: str = "0x80420031",
-                 pkcs11_tool: Optional[str] = None):
+                 pkcs11_tool: Optional[str] = None,
+                 cert_id: str = "01"):
         if pkcs11_tool is None:
             pkcs11_tool = self._find_tool()
         if not Path(pkcs11_tool).exists():
@@ -61,6 +62,8 @@ class OpenSCSigner:
         self._tool = pkcs11_tool
         self._module = module_path
         self._mechanism = mechanism
+        # CKA_ID of the certificate object; "01" on Almaz-1K, may differ elsewhere.
+        self._cert_id = cert_id
         self._pin: Optional[str] = None
 
         if not Path(module_path).exists():
@@ -132,10 +135,11 @@ class OpenSCSigner:
         r = self._run(["--login", "--pin", self._pin, "--list-objects"])
         return r.stdout.decode("utf-8", errors="replace")
 
-    def get_certificate(self, object_id: str = "01") -> bytes:
+    def get_certificate(self, object_id: Optional[str] = None) -> bytes:
         """Експорт сертифіката у DER-форматі."""
         if not self._pin:
             raise RuntimeError("PIN не встановлено")
+        object_id = object_id or self._cert_id
         # Private (0700) temp dir: no predictable path in a shared /tmp,
         # so nothing can pre-create/symlink the output file.
         tmp = tempfile.mkdtemp(prefix="sedo-cert-")
@@ -149,7 +153,14 @@ class OpenSCSigner:
             if r.returncode != 0:
                 stderr = r.stderr.decode("utf-8", errors="replace")
                 raise RuntimeError(f"read-object failed: {stderr}")
-            return Path(out_path).read_bytes()
+            blob = Path(out_path).read_bytes()
+            if not blob:
+                # rc=0 but nothing written — e.g. wrong CKA_ID; don't let an
+                # empty cert flow into authorize() as "0 bytes".
+                raise RuntimeError(
+                    f"pkcs11-tool produced an empty certificate (id={object_id}); "
+                    "check the CKA_ID with --list-objects")
+            return blob
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
@@ -174,7 +185,10 @@ class OpenSCSigner:
             if r.returncode != 0:
                 stderr = r.stderr.decode("utf-8", errors="replace")
                 raise RuntimeError(f"sign failed: {stderr}")
-            return Path(out_path).read_bytes()
+            sig = Path(out_path).read_bytes()
+            if not sig:
+                raise RuntimeError("pkcs11-tool produced an empty signature")
+            return sig
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
@@ -230,6 +244,13 @@ def main():
     if args.list_mechanisms:
         for line in signer.list_mechanisms():
             print(f"  {line}")
+
+    # B6: previously --list-objects/--get-cert/--sign silently did nothing
+    # without --pin. Prompt interactively (same as pkcs11_signer.main).
+    needs_pin = bool(args.list_objects or args.get_cert or args.sign)
+    if needs_pin and not args.pin:
+        import getpass
+        args.pin = getpass.getpass("Token PIN: ")
 
     if args.pin:
         signer.login(args.pin)
