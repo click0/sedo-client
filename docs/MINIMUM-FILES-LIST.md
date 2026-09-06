@@ -15,7 +15,7 @@ Year:     2025-2026
 
 ## Scenario A: HW Almaz-1K (USB token)
 
-### Required DLLs (4 files, ~2.0 MB)
+### Required DLLs (4 files, ~2.5 MB)
 
 ```
 PKCS11.EKeyAlmaz1C.dll    356-418 KB  v1.0.1.7   entry point (C_GetFunctionList)
@@ -40,7 +40,8 @@ PRNGParameters.cap           80 B     PRNG init
 RSAParameters.cap            40 B     RSA (legacy)
 ```
 
-**Total HW: ~4.6 MB.** All files must be in the same directory.
+**Total HW: 4 DLL (~2.5 MB) + 9 `.cap` (~2.5 MB) ≈ 5 MB.** All files must
+be in the same directory.
 
 ### System dependencies
 
@@ -52,7 +53,10 @@ RSAParameters.cap            40 B     RSA (legacy)
 
 ## Scenario B: Virtual token (Key-6.dat, no USB)
 
-All of Scenario A **plus** these additional DLLs:
+The shared crypto DLLs and `.cap` files from Scenario A (`CSPBase`,
+`CSPExtension`, `PKIFormats`, 9 `.cap`) — **without** `PKCS11.EKeyAlmaz1C.dll`,
+which is the HW entry point and is not used — **plus** these additional DLLs
+(see the directory layout below for what is HW-only / Virtual-only):
 
 ```
 PKCS11.Virtual.EKeyAlmaz1C.dll   968-1019 KB  v1.0.1.10  virtual entry point
@@ -131,7 +135,7 @@ Use a single snapshot of all files from the same IIT installation.
 python -c "
 import PyKCS11
 lib = PyKCS11.PyKCS11Lib()
-lib.load(r'C:\sedo-automation\libs\PKCS11.EKeyAlmaz1C.dll')
+lib.load(r'C:\sedo-client\libs\PKCS11.EKeyAlmaz1C.dll')
 print('OK:', lib.getInfo().libraryDescription.strip())
 "
 ```

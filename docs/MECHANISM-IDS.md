@@ -72,10 +72,14 @@ pkcs11-tool.exe --module "C:\...\EKeys\Almaz1C\PKCS11.EKeyAlmaz1C.dll" --list-me
 | Модуль | Виробник | DSTU 4145 ID | Підхід |
 |---|---|---|---|
 | **`PKCS11.EKeyAlmaz1C.dll`** | **IIT** | **0x80420031** | Vendor-defined (CKM_VENDOR_DEFINED + IIT tag) |
-| `avcryptokinxt.dll` | ТОВ "Автор" | `0x00000352` | Standard PKCS#11 v3.0 `CKM_DSTU4145` |
-| `efitkeynxt.dll` | EFIT | невідомо | |
+| `avcryptokinxt.dll` | ТОВ "Автор" (Avest) | `0x00000352` | Standard PKCS#11 v3.0 `CKM_DSTU4145` |
+| `Av337CryptokiD.dll` | ТОВ "Автор" (Avest), SecureToken-337/338 | `0x00000352` | Standard `CKM_DSTU4145` |
+| `efitkeynxt.dll` | EFIT (AvestKey/EfitKey) | `0x00000352` | Standard `CKM_DSTU4145` — той самий стек, що й `avcryptokinxt` |
 
-У `mechanism_ids.py` є автоматичний detection через `detect_dstu4145_mechanism()`.
+У `mechanism_ids.py` є автоматичний detection через `detect_dstu4145_mechanism()`:
+`detect_token_vendor()` мапить `avcryptoki` / `av337` / `cc33` / `efitkey` на
+вендора `"avest"` → `0x00000352`; усе з `ekeyalmaz1c` / `ekeycrystal` → IIT
+`0x80420031`; невідомі модулі — теж IIT (за замовчуванням).
 
 ## Як використати
 

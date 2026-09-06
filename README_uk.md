@@ -68,7 +68,7 @@ Windows worker
     │                                    ▼
     │                         IIT "Користувач ЦСК" (GUI запущено)
     │
-    └── PKCS11.EKeyAlmaz1C.dll + CSPBase.dll + CSPExtension.dll + *.cap
+    └── PKCS11.EKeyAlmaz1C.dll + CSPBase.dll + CSPExtension.dll + PKIFormats.dll + *.cap
             │
             ▼ WinSCard (PC/SC)
         Almaz-1K USB
@@ -217,8 +217,9 @@ python -m pytest tests/ -v
 
 На кожен push / pull request у `main`:
 
-- **Tests** (`tests.yml`) — `pytest` на Python 3.11 та 3.12, плюс перевірка
-  збірки й встановлення (`pip install .`, запуск `sedo-client --help`)
+- **Tests** (`tests.yml`) — `pytest` на Python 3.11, 3.12 та 3.13, плюс
+  перевірка пакування (`python -m build --wheel`, `pip install dist/*.whl`,
+  запуск `sedo-client --help`)
 - **Spellcheck** (`spellcheck.yml`) — `cspell`; кирилиця ігнорується через
   regex у `.cspell.json`, whitelist покриває жаргон (DSTU, PKCS, IIT, …)
 
@@ -338,5 +339,5 @@ git push origin v0.29
 
 - Автоматизацію логіну в СЕДО ЗСУ (`sedo.mod.gov.ua`)
 - Інтеграцію Ansible playbook ↔ Windows worker ↔ Алмаз-1К
-- Трибекендну архітектуру (opensc / pkcs11 / iit_agent)
+- Чотирибекендну архітектуру (opensc / pkcs11 / virtual / iit_agent)
 - Повний цикл: логін → завантаження → верифікація → Telegram-звіт

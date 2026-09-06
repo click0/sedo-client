@@ -31,6 +31,10 @@ Windows worker
     │       │
     │       ├── pkcs11_signer.py ─── PyKCS11 (ctypes) ──▶ PKCS11.EKeyAlmaz1C.dll
     │       │
+    │       ├── virtual_signer.py ── PyKCS11 (ctypes) ──▶ PKCS11.Virtual.EKeyAlmaz1C.dll
+    │       │                                              ↓ (без USB; Linux/Wine — див.
+    │       │                                          Key-6.dat   docs/LINUX-WINE-DEPLOYMENT.md)
+    │       │
     │       └── iit_client.py ─── HTTP POST ──▶ http://127.0.0.1:8081/json-rpc
     │                                                ↓
     │                                           EUSignAgent.exe (GUI Користувач ЦСК)
@@ -44,7 +48,8 @@ Windows worker
             ├── C:\Program Files (x86)\Institute of Informational Technologies\EKeys\Almaz1C\
             │       ├── PKCS11.EKeyAlmaz1C.dll    (356 KB)
             │       ├── CSPBase.dll               (1.15 MB)
-            │       └── CSPExtension.dll          (80 KB)
+            │       ├── CSPExtension.dll          (80 KB)
+            │       └── PKIFormats.dll            (975 KB)  ← ASN.1/X.509, обов'язкова
             │
             ├── *.cap параметри (розкидані по кількох директоріях)
             │
@@ -111,12 +116,15 @@ Windows worker
 
 ```
 якщо --backend=auto (або не вказано):
-    спробувати opensc → PyKCS11 → iit_agent
-якщо --backend=opensc: 
+    спробувати opensc → pkcs11 → virtual → iit_agent
+якщо --backend=opensc:
     потребує pkcs11-tool.exe (32-bit)
-якщо --backend=pkcs11: 
+якщо --backend=pkcs11:
     потребує PyKCS11 (може бути складно компілювати)
-якщо --backend=iit_agent: 
+якщо --backend=virtual:
+    потребує PyKCS11 + PKCS11.Virtual.EKeyAlmaz1C.dll + Key-6.dat
+    (без USB-токена; єдиний варіант для Linux/Wine без Windows-воркера)
+якщо --backend=iit_agent:
     потребує запущеної "Користувач ЦСК" GUI (HTTP на 8081)
 ```
 

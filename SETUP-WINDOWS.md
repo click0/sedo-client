@@ -90,7 +90,8 @@ pip install PyKCS11
 C:\Program Files (x86)\Institute of Informational Technologies\EKeys\Almaz1C\
 ├── PKCS11.EKeyAlmaz1C.dll     (356 KB, 32-bit)
 ├── CSPBase.dll                (1.15 MB)
-└── CSPExtension.dll           (80 KB)
+├── CSPExtension.dll           (80 KB)
+└── PKIFormats.dll             (975 KB)   ← обов'язкова, ASN.1/X.509 (docs/MINIMUM-FILES-LIST.md)
 ```
 
 `.cap` файли (параметри кривих) можуть бути розкидані по IIT директоріях:
@@ -314,7 +315,7 @@ ansible-playbook -i inventory/hosts.yml \
 
 ### `Library not initialized` / `CKR_GENERAL_ERROR`
 
-**Причина:** `CSPBase.dll` + `CSPExtension.dll` не поруч з PKCS11 DLL, або `.cap` файли не знайдено.
+**Причина:** `CSPBase.dll` + `CSPExtension.dll` + `PKIFormats.dll` не поруч з PKCS11 DLL, або `.cap` файли не знайдено.
 
 **Рішення:** скрипт `opensc-test-almaz.ps1` автоматично збирає .cap у PATH. Якщо ручний запуск — ось повна команда з PATH:
 
