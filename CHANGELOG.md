@@ -7,6 +7,78 @@ Contact:  github.com/click0
 License:  BSD 3-Clause "New" or "Revised" License
 ```
 
+## v0.29 — 2026-09-06
+
+Реліз за результатами трьох паралельних аудитів v0.28.1 (ядро Python /
+CI + пакування + Ansible / тести + доки). Кожна заява перевірена повторним
+читанням коду перед фіксом.
+
+### Безпека
+
+- **PIN більше не потрапляє в лог** (`iit_client.call`): параметри
+  `ReadPrivateKey*` / `ChangePrivateKeyPassword` логуються як `[***]` на
+  рівні DEBUG (`-v`). Те саме у `scripts/fiddler_analyze.py`.
+- **TLS-перевірка вимикається лише на loopback**: `verify=False` для агента
+  тільки коли host — `127.0.0.1` / `::1` / `localhost`; для `--host remote
+  --https` сертифікат перевіряється.
+- **`doc_id` із сервера санітизується** перед побудовою шляху/URL у
+  `download_document` (`^[A-Za-z0-9._-]{1,128}$`, без `..`) — path traversal
+  через відповідь СЕДО неможливий.
+- **PIN через `SEDO_PIN`**: пріоритет `--pin` → env `SEDO_PIN` → `getpass`.
+  Help `--pin` попереджає, що аргумент видно у списку процесів.
+- `opensc_signer`: вхід/вихід підпису та сертифікат живуть у приватному
+  (0700) `mkdtemp`-каталозі, який видаляється у `finally`.
+- `.gitignore`: `downloads/`, `verified/`, `Key-*.dat`, `*.pfx`, `*.p12`,
+  `*.der`, `release_notes.md`.
+- Ansible inventory: `ansible_winrm_server_cert_validation: validate`,
+  пароль WinRM — з vault (`winrm_passwords`), а не з inventory.
+- Усі GitHub Actions запінені на commit-SHA; Dependabot для `github-actions`.
+
+### Виправлено
+
+- `virtual_signer`: `--key-file` чесно лише валідує (DLL бере `Key-N.dat`
+  з каталогу, налаштованого у реєстрі); попередження, якщо файл не поруч
+  із модулем.
+- `_flow_direct_kep`: невдалий `/verify` не перериває перебір endpoint-ів.
+- `iit_client.finalize` / `IITAgentAdapter.logout`: ловлять усю сім'ю
+  `IITError` — втрачений агент під час teardown не маскує реальну помилку.
+- `IITAgentAdapter.login`: guard на не-dict відповідь `GetOwnCertificate`;
+  DER — hex, потім strict base64; `RuntimeError` замість `binascii.Error`.
+- `opensc_signer`: порожній вивід `pkcs11-tool` — помилка; CKA_ID
+  сертифіката — `cert_id` у конструкторі. CLI питає PIN через `getpass`,
+  якщо `--list-objects/--get-cert/--sign` задано без `--pin` (раніше мовчки
+  нічого не робив).
+- Challenge декодується strict-base64; plaintext nonce підписується як є.
+- `mechanism_ids.choose_sign_mechanism()` — єдина політика вибору
+  sign-механізму (відомий DSTU → vendor-defined → перший) для `pkcs11` та
+  `virtual`.
+- `iit_client`: дефолтний порт агента 8081 (9100 був здогадом).
+
+### CI / реліз
+
+- **Один реліз замість чотирьох гонок**: `build-windows.yml` /
+  `build-unix.yml` стали reusable (`workflow_call`) і не публікують;
+  `release.yml` викликає їх, збирає бінарники, пакує архіви, пише **один**
+  `sha256sums.txt` на архіви **і** бінарники та робить єдиний виклик
+  `action-gh-release`. `concurrency`-група на тег. `workflow_dispatch` =
+  сухий прогін без релізу.
+
+### Документація
+
+- `OPENSC-QUICKSTART.md`: приклади підпису використовували `0x80420014`
+  (симетричний MAC — кожна спроба спалювала PIN-спробу) → `0x80420031`
+  (DSTU 4145); шлях DLL → `…\EKeys\Almaz1C\PKCS11.EKeyAlmaz1C.dll`; чотири
+  backend замість трьох (додано `virtual`).
+- README (обидві мови): секція CI описує новий пайплайн і dry-run; реліз
+  можна зробити з веб-UI.
+
+### Тести
+
+- `tests/conftest.py`: fixture `fake_pykcs11` — тестування
+  `virtual_signer` / `pkcs11_signer` без встановленого PyKCS11 (як у CI).
+- `tests/test_security.py` (24), `tests/test_fiddler_analyze.py` (3),
+  `tests/test_bugs_v029.py` (34). Разом 151 тест.
+
 ## v0.28.1 — 2026-08-08
 
 ### Виправлено (CI)
