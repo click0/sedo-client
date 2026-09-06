@@ -7,6 +7,38 @@ Contact:  github.com/click0
 License:  BSD 3-Clause "New" or "Revised" License
 ```
 
+## v0.30 — unreleased
+
+Другий етап аудиту v0.28.1: Ansible, тести, док-дрифт.
+
+### Ansible
+
+- **PIN через `SEDO_PIN`**, а не `--pin` у командному рядку: обидва playbook
+  передають PIN у `environment:` — він не потрапляє у список процесів
+  воркера. `no_log` лишається на самому запуску, але при провалі окремий
+  task показує `rc`/`stdout`/`stderr` (там PIN нема) — раніше `no_log`
+  ховав усю діагностику.
+- `changed_when` — лише коли клієнт реально щось завантажив
+  (`Документів: N>0`), а не на кожен `rc == 0`.
+- **Обидві назви DLL** у guard Windows-playbook: `PKCS11.EKeyAlmaz1C.dll`
+  (інсталер IIT) і `PKCS11_EKeyAlmaz1C.dll` (старі копії) — раніше playbook
+  падав після слідування `docs/MINIMUM-FILES-LIST.md`.
+- `hosts.yml`: `client_path: C:\sedo-client` — як у SETUP-WINDOWS/README
+  (було `C:\sedo-automation`, playbook падав після гайду).
+- `sedo_daily_linux.yml`: завантаження йдуть у `<client_path>/downloads/<date>`
+  і **fetch-аться на controller** у `/opt/sedo-reports/<host>/<date>/` — як у
+  Windows-play (раніше `register: downloaded` ніхто не споживав, працювало
+  лише завдяки `connection: local`).
+- Verify-play обох playbook перевіряє **лише сьогоднішній каталог**
+  (`<host>/<date>/*.zip`, без `verified/`) — раніше кожен запуск
+  переверифікував усю історію.
+- `SETUP-WINDOWS.md` крок 8.2b: експорт WinRM-сертифіката для
+  `ansible_winrm_ca_trust_path`; `LINUX-WINE-DEPLOYMENT.md` §7 — приклад з
+  `virtual_pins[inventory_hostname]` замість неіснуючого `virtual_pin`.
+- Перевірено: `ansible-playbook --syntax-check` обох playbook, `ansible-lint`
+  (profile moderate), локальний прогін verify-play з тестовою структурою
+  каталогів.
+
 ## v0.29 — 2026-09-06
 
 Реліз за результатами трьох паралельних аудитів v0.28.1 (ядро Python /

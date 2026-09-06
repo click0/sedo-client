@@ -7,6 +7,11 @@
 #   - 32-bit Wine prefix at {{ wine_prefix }}
 #   - IIT DLLs + Key-6.dat in {{ sedo_libs }}
 #   - Registry keys set inside the prefix
+#
+# The PIN reaches the client via the SEDO_PIN environment variable
+# (sedo_client.py: --pin → SEDO_PIN → getpass), so it never appears on the
+# command line / process list. no_log stays on the run task as defence in
+# depth; rc/stdout/stderr are shown by a separate task on failure.
 
 - name: SEDO daily check (Linux / Wine / virtual token)
   hosts: sedo_workers_linux
@@ -16,7 +21,11 @@
 
   vars:
     date_today: "{{ ansible_date_time.date }}"
-    output_dir: "/opt/sedo-reports/{{ inventory_hostname }}/{{ date_today }}"
+    client_path: "{{ sedo_client_path | default('/opt/sedo-client') }}"
+    # Worker-local download dir; files are then fetched to the controller
+    # under report_root/<host>/<date>/ (same layout as the Windows play).
+    output_dir: "{{ client_path }}/downloads/{{ date_today }}"
+    report_root: /opt/sedo-reports
     wine_prefix: "/opt/sedo-wine"
     sedo_libs: "{{ wine_prefix }}/drive_c/sedo-libs"
     virtual_module: "{{ sedo_libs }}/PKCS11.Virtual.EKeyAlmaz1C.dll"
@@ -67,21 +76,35 @@
     - name: Run sedo-client with virtual backend
       ansible.builtin.command:
         cmd: >-
-          python3 /opt/sedo-client/sedo_client.py
+          python3 {{ client_path }}/sedo_client.py
           --url "{{ sedo_url | default('https://sedo.mod.gov.ua') }}"
           --backend virtual
           --module "{{ virtual_module }}"
           --key-file "{{ key_file }}"
-          --pin "{{ virtual_pins[inventory_hostname] }}"
           --fetch
           --since "{{ date_today }}"
           --output "{{ output_dir }}"
       environment:
         WINEPREFIX: "{{ wine_prefix }}"
+        SEDO_PIN: "{{ virtual_pins[inventory_hostname] }}"
       no_log: true
       register: sedo_result
-      changed_when: sedo_result.rc == 0
-      failed_when: sedo_result.rc != 0
+      failed_when: false
+      # "changed" only when something was actually downloaded, not on any rc==0.
+      changed_when: "sedo_result.stdout is search('Документів: [1-9]')"
+
+    - name: Show client diagnostics on failure (rc / stdout / stderr, no PIN)
+      ansible.builtin.debug:
+        msg:
+          rc: "{{ sedo_result.rc }}"
+          stdout: "{{ sedo_result.stdout | default('') }}"
+          stderr: "{{ sedo_result.stderr | default('') }}"
+      when: sedo_result.rc != 0
+
+    - name: Stop if the client failed
+      ansible.builtin.fail:
+        msg: "sedo-client exited with rc={{ sedo_result.rc }} — see diagnostics above"
+      when: sedo_result.rc != 0
 
     - name: Find downloaded documents
       ansible.builtin.find:
@@ -89,27 +112,46 @@
         patterns: "*.zip"
       register: downloaded
 
+    # Works for a remote Linux worker and for lin01 (connection: local) alike.
+    - name: Fetch to the controller
+      ansible.builtin.fetch:
+        src: "{{ item.path }}"
+        dest: "{{ report_root }}/{{ inventory_hostname }}/{{ date_today }}/"
+        flat: true
+      loop: "{{ downloaded.files }}"
+      when: downloaded.files | length > 0
+
 - name: Verify downloaded signatures
   hosts: localhost
   gather_facts: true
   vars:
     date_today: "{{ ansible_date_time.date }}"
+    report_root: /opt/sedo-reports
 
   tasks:
-    - name: Find all ZIPs for today
+    - name: Find all ZIPs
       ansible.builtin.find:
-        paths: "/opt/sedo-reports"
+        paths: "{{ report_root }}"
         patterns: "*.zip"
         recurse: true
       register: zip_files
 
+    # Only today's directory (<host>/<date>/*.zip) — otherwise every run
+    # re-verifies the whole history and verified/ grows without bound.
+    - name: Select today's ZIPs
+      ansible.builtin.set_fact:
+        todays_zips: >-
+          {{ zip_files.files | map(attribute='path')
+             | select('search', '/' ~ date_today ~ '/')
+             | reject('search', '/verified/') | list }}
+
     - name: Run ua-sign-verify on each document
       ansible.builtin.command:
         cmd: >-
-          python3 /opt/ua-sign-verify/cli/main.py "{{ item.path }}"
-          --result-dir "/opt/sedo-reports/verified/{{ date_today }}"
+          python3 /opt/ua-sign-verify/cli/main.py "{{ item }}"
+          --result-dir "{{ report_root }}/verified/{{ date_today }}"
           --no-console
-      loop: "{{ zip_files.files }}"
+      loop: "{{ todays_zips }}"
       register: verify_results
       changed_when: false
       failed_when: false

@@ -126,15 +126,20 @@ python3 sedo_client.py \
 
 ## 7. Ansible (Linux worker)
 
-No WinRM required. Run directly on the controller or a Linux worker:
+No WinRM required. The full playbook is
+`ansible/playbooks/sedo_daily_linux.yml` (inventory group
+`sedo_workers_linux`, PINs in `vault.yml` under `virtual_pins`). The core
+task looks like this — note the PIN goes through the `SEDO_PIN` environment
+variable, never through `--pin` on the command line:
 
 ```yaml
 - name: SEDO daily check (Linux/Wine virtual token)
   hosts: sedo_workers_linux
-  gather_facts: false
+  gather_facts: true
   vars_files:
     - ../inventory/vault.yml
   vars:
+    date_today: "{{ ansible_date_time.date }}"
     wine_prefix: "/opt/sedo-wine"
     sedo_libs: "{{ wine_prefix }}/drive_c/sedo-libs"
   tasks:
@@ -145,12 +150,12 @@ No WinRM required. Run directly on the controller or a Linux worker:
           --backend virtual
           --module "{{ sedo_libs }}/PKCS11.Virtual.EKeyAlmaz1C.dll"
           --key-file "{{ sedo_libs }}/Key-6.dat"
-          --pin "{{ virtual_pin }}"
           --fetch
-          --since "{{ lookup('pipe', 'date +%Y-%m-%d') }}"
-          --output "/opt/sedo-reports/{{ lookup('pipe', 'date +%Y-%m-%d') }}"
+          --since "{{ date_today }}"
+          --output "/opt/sedo-client/downloads/{{ date_today }}"
       environment:
         WINEPREFIX: "{{ wine_prefix }}"
+        SEDO_PIN: "{{ virtual_pins[inventory_hostname] }}"
       no_log: true
 ```
 
