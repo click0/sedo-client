@@ -12,13 +12,26 @@ Year:     2025-2026
 import base64
 import logging
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Optional, Protocol
+from urllib.parse import quote
 
 import requests
 
 log = logging.getLogger(__name__)
+
+# Server-supplied document ids are used as a path segment and a filename —
+# restrict to a safe charset so ".." / "/" / drive-letters can't escape output_dir.
+_DOC_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
+
+
+def _safe_doc_id(doc_id) -> str:
+    """Validate a document id from SEDO JSON before using it in a path/URL."""
+    if not isinstance(doc_id, str) or not _DOC_ID_RE.match(doc_id) or ".." in doc_id:
+        raise ValueError(f"Unsafe document id: {doc_id!r}")
+    return doc_id
 
 
 def force_utf8_io() -> None:
@@ -261,10 +274,12 @@ class SEDOClient:
         return r.json().get("documents", [])
 
     def download_document(self, doc_id: str, output_dir: Path) -> Path:
+        doc_id = _safe_doc_id(doc_id)
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
-        r = self.session.get(f"{self.sedo_url}/api/documents/{doc_id}/export",
-                             timeout=60)
+        r = self.session.get(
+            f"{self.sedo_url}/api/documents/{quote(doc_id, safe='')}/export",
+            timeout=60)
         r.raise_for_status()
         output = output_dir / f"{doc_id}.zip"
         output.write_bytes(r.content)
@@ -324,10 +339,9 @@ class IITAgentAdapter:
 
 # ═══════════════════════════════════════════════════════════════
 
-def main():
+def _build_parser():
+    """CLI argument parser (separate so tests can inspect real choices)."""
     import argparse
-
-    force_utf8_io()
 
     parser = argparse.ArgumentParser(description="SEDO ЗСУ automation")
     parser.add_argument("--url", default=SEDO_MOD_URL,
@@ -338,19 +352,32 @@ def main():
                         help="Signing backend")
     parser.add_argument("--module", help="Path to PKCS#11 module DLL")
     parser.add_argument("--key-file",
-                        help="Path to Key-6.dat (virtual backend)")
-    parser.add_argument("--pin", help="Token PIN")
+                        help="Path to Key-6.dat (virtual backend). NOTE: the "
+                             "virtual DLL locates Key-N.dat from its own "
+                             "configured directory; this flag only validates.")
+    parser.add_argument("--pin",
+                        help="Token PIN. Visible in the process list — prefer "
+                             "the SEDO_PIN environment variable or the prompt.")
     parser.add_argument("--fetch", action="store_true")
     parser.add_argument("--since", help="Fetch docs since YYYY-MM-DD")
     parser.add_argument("--output", default="./downloads")
     parser.add_argument("-v", "--verbose", action="store_true")
-    args = parser.parse_args()
+    return parser
+
+
+def main():
+    force_utf8_io()
+
+    args = _build_parser().parse_args()
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s",
     )
 
+    # PIN precedence: --pin (argv, least safe) → SEDO_PIN env → interactive prompt.
+    if not args.pin:
+        args.pin = os.environ.get("SEDO_PIN")
     if not args.pin:
         import getpass
         args.pin = getpass.getpass("Token PIN: ")

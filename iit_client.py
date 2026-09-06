@@ -51,6 +51,24 @@ EUSIGNCP_REGISTRY_PATH = (
 # 8081/8083 — підтверджені порти з реєстру (HTTPPort/HTTPSPort)
 FALLBACK_PORTS = [8081, 8083, 9100, 9101, 8080, 8443, 9000, 9090]
 
+# JSON-RPC methods whose params carry a PIN/password — never log their params.
+_REDACTED_METHODS = frozenset({
+    "ReadPrivateKey", "ReadPrivateKeyBinary", "ReadPrivateKeyFile",
+    "ChangePrivateKeyPassword",
+})
+
+
+def _is_loopback(host: str) -> bool:
+    """True for 127.0.0.1 / ::1 / localhost — the only hosts where TLS
+    verification may be skipped (self-signed agent cert)."""
+    import ipaddress
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
 
 def read_port_from_registry() -> tuple[Optional[int], Optional[int]]:
     """
@@ -158,16 +176,17 @@ def probe_port(host: str = "127.0.0.1", port: int = 9100,
     """Перевіряє чи відповідає сервер на порту."""
     scheme = "https" if use_https else "http"
     url = f"{scheme}://{host}:{port}/json-rpc"
+    # Skip TLS verification only for the self-signed agent cert on loopback.
+    skip_verify = use_https and _is_loopback(host)
     try:
-        if use_https:
-            # self-signed agent cert on localhost — silence urllib3 warning
+        if skip_verify:
             try:
                 import urllib3
                 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
             except ImportError:
                 pass
         # OPTIONS preflight — агент підтримує CORS
-        r = requests.options(url, timeout=timeout, verify=not use_https)
+        r = requests.options(url, timeout=timeout, verify=not skip_verify)
         return r.status_code in (200, 204, 405)
     except requests.exceptions.RequestException:
         return False
@@ -264,8 +283,9 @@ class IITClient:
             "Origin": origin,
             "User-Agent": "sedo-automation/1.0",
         })
-        if use_https:
-            # self-signed cert агента локально на 127.0.0.1 — pinning не потрібен
+        if use_https and _is_loopback(host):
+            # Self-signed agent cert on loopback only. For any non-loopback
+            # host (e.g. --host remote --https) TLS stays fully verified.
             self.session.verify = False
             try:
                 import urllib3
@@ -305,7 +325,9 @@ class IITClient:
         if self._session_id:
             payload["session_id"] = self._session_id
 
-        log.debug("→ %s(%s)", method, params)
+        # Never log params for PIN-carrying methods (would leak the PIN at -v).
+        log.debug("→ %s(%s)", method,
+                  "[***]" if method in _REDACTED_METHODS else params)
         try:
             r = self.session.post(self.base_url, json=payload, timeout=self.timeout)
         except requests.exceptions.RequestException as e:

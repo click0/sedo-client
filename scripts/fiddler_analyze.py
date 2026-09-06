@@ -14,6 +14,13 @@ import zipfile
 import re
 from pathlib import Path
 
+# JSON-RPC methods whose params carry the token PIN. Duplicated from
+# iit_client (scripts/ stays import-free of the package) — keep in sync.
+_REDACTED_METHODS = frozenset({
+    "ReadPrivateKey", "ReadPrivateKeyBinary", "ReadPrivateKeyFile",
+    "ChangePrivateKeyPassword",
+})
+
 
 def parse_saz(saz_path: Path) -> list[dict]:
     """Парсить SAZ файл (ZIP с sessions всередині)."""
@@ -98,7 +105,11 @@ def analyze(saz_path: Path):
             try:
                 payload = json.loads(body_match.group(1).strip())
                 method = payload.get("method", "?")
-                params_preview = str(payload.get("params", []))[:60]
+                # Never echo params of PIN-carrying methods from a capture.
+                if method in _REDACTED_METHODS:
+                    params_preview = "[***]"
+                else:
+                    params_preview = str(payload.get("params", []))[:60]
                 print(f"  [{s['num']:4}] {method}({params_preview})")
             except (json.JSONDecodeError, ValueError):
                 print(f"  [{s['num']:4}] {s['method_url'][:80]}")
