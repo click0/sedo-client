@@ -5,7 +5,7 @@ Project:  sedo-client
 Author:   Vladyslav V. Prodan
 Contact:  github.com/click0
 Phone:    +38(099)6053340
-Version:  0.29
+Version:  0.30
 License:  BSD 3-Clause "New" or "Revised" License
 Year:     2025-2026
 ```
