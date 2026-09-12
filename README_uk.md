@@ -9,7 +9,7 @@
 Author:   Vladyslav V. Prodan
 Contact:  github.com/click0
 Phone:    +38(099)6053340
-Version:  0.29
+Version:  0.30
 License:  BSD 3-Clause "New" or "Revised" License
 Year:     2025-2026
 ```
@@ -210,7 +210,7 @@ sedo-client/
 ```bash
 pip install pytest requests
 python -m pytest tests/ -v
-# 151 passed
+# 208 passed
 ```
 
 ## CI
@@ -242,12 +242,12 @@ checksums вивантажуються як артефакт `release-bundle` д
 або запушити тег:
 
 ```bash
-git tag v0.29
-git push origin v0.29
+git tag v0.30
+git push origin v0.30
 ```
 
 або через веб: *Releases → Draft a new release → Choose a tag → ввести
-`v0.29` → Create new tag on publish* (target `main`). Поява тега запускає
+`v0.30` → Create new tag on publish* (target `main`). Поява тега запускає
 `release.yml`, який сам заповнює нотатки й додає файли.
 
 ## Пов'язані проекти

@@ -7,9 +7,11 @@ Contact:  github.com/click0
 License:  BSD 3-Clause "New" or "Revised" License
 ```
 
-## v0.30 — unreleased
+## v0.30 — 2026-09-12
 
-Другий етап аудиту v0.28.1: Ansible, тести, док-дрифт.
+Другий етап аудиту v0.28.1 (Ansible, тести, док-дрифт) плюс інструмент і
+схема зберігання для дослідження нових версій DLL ІІТ (`scripts/iit_inventory.py`,
+`docs/inventory/`, ADDENDUM v7).
 
 ### Скрипти
 
