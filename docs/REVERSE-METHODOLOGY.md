@@ -27,6 +27,9 @@ Year:     2025-2026
 | Python + `struct` | Розпарсити PE header, знайти arrays в .data |
 | `grep`, `awk` | Фільтрація великих dumps |
 | `file` | Ідентифікація архітектури (PE32 vs PE32+) |
+| `scripts/iit_inventory.py` | **Наш** stdlib-інвентаризатор: версії, sha256, експорти/імпорти, LoadLibrary-залежності, DWORD-лічильники mechanism ID, diff між snapshot-ами, реєстр (`docs/DLL-REGISTRY.md`) |
+| `scripts/iit_unpack.sh` | Розпакування інсталяторів без запуску: `msiextract` (msitools), `innoextract`, `cabextract`, `7z` |
+| `pefile` (Python, опційно) | Cross-check нашого парсера: `pip install .[analysis]`, `--engine pefile` |
 
 ## Категорії бінарок IIT
 
@@ -200,35 +203,41 @@ strings PKCS11.EKeyAlmaz1C.dll | grep -i "CSPBase\|GetProcAddress"
 
 ## Reproduce нашу роботу
 
-Якщо є доступ до свіжої версії IIT:
+Якщо є доступ до свіжої версії IIT (інсталятор з
+<https://iit.com.ua/download/productfiles/> або архів DLL):
 
 ```bash
-# 1. Витягти DLL з інсталятора
-EUInstall.exe /extract:extracted  # або відкрити як 7z архів
+# 0. Інструменти (один раз)
+apt-get install -y msitools cabextract p7zip-full innoextract
+pip install .[analysis]           # pefile — лише для cross-check
 
-# 2. Аналіз експортів
-cd extracted
-for f in *.dll; do
-    echo "=== $f ==="
-    objdump -p "$f" | awk '/Ordinal\/Name Pointer/,/PE File Base/' | wc -l
-done
+# 1. Розпакувати, НЕ запускаючи (тип визначається за сигнатурою:
+#    .msi → msiextract; Inno .exe → innoextract; CAB-SFX → cabextract; 7z/zip)
+scripts/iit_unpack.sh EUInstall.msi downloads/iit/2026-09/euinstall
 
-# 3. Знайти PKCS11 модулі
-for f in *.dll; do
-    if objdump -p "$f" | grep -q C_GetFunctionList; then
-        echo "$f — PKCS#11 module"
-    fi
-done
+# 2. Інвентар + diff проти попередніх snapshot-ів + списки експортів
+python scripts/iit_inventory.py downloads/iit/2026-09/euinstall --label euinstall \
+    --snapshot-label S4-2026-09-euinstall --source "EUInstall.msi sha256=…" \
+    --baseline docs/inventory/S3-2026-07-web_dll.json \
+    --json docs/inventory/S4-2026-09-euinstall.json --md /tmp/S4.md \
+    --exports-dir docs/inventory/exports
 
-# 4. Перевірка бітності
-for f in *.dll; do
-    arch=$(file -b "$f" | grep -oE "I386|x86_64")
-    echo "$f: $arch"
-done
+# 3. Реєстр версій по всіх snapshot-ах
+python scripts/iit_inventory.py --registry docs/inventory/snapshot-*.json docs/inventory/S*.json \
+    --md docs/DLL-REGISTRY.md
 
-# 5. Live тест mechanism IDs
+# 4. Ручний cross-check (те, що робив скрипт)
+objdump -p PKCS11.EKeyAlmaz1C.dll | awk '/Ordinal\/Name Pointer/,/PE File Base/' | wc -l
+objdump -p X.dll | grep -q C_GetFunctionList && echo "PKCS#11 module"
+file -b X.dll | grep -oE "I386|x86_64"
+sha256sum *.dll
+
+# 5. Live тест mechanism IDs — ТІЛЬКИ на Windows з токеном (статика — гіпотеза)
 pkcs11-tool --module PKCS11.EKeyAlmaz1C.dll --list-mechanisms
 ```
+
+Що зберігаємо в git: лише похідні метадані (`docs/inventory/*.json`, списки
+експортів, `docs/DLL-REGISTRY.md`). Самі DLL/інсталятори — в `.gitignore`.
 
 ## Етичні питання
 

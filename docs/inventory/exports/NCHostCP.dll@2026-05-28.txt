@@ -1,0 +1,9 @@
+NCHostFreeInterface
+NCHostFreeInterfaceCAGateway
+NCHostFreeInterfaceEx
+NCHostFreeInterfaceJSONServer
+NCHostGetInterface
+NCHostGetInterfaceCAGateway
+NCHostGetInterfaceEx
+NCHostGetInterfaceJSONServer
+NCHostGetVersion
