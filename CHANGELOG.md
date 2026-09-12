@@ -7,6 +7,20 @@ Contact:  github.com/click0
 License:  BSD 3-Clause "New" or "Revised" License
 ```
 
+## v0.31 — unreleased
+
+### CI
+
+- Усі GitHub Actions підняті до актуальних мажорних версій одним PR
+  (замість п'яти конфліктних PR від Dependabot): `actions/checkout` 4.4.0 →
+  7.0.1, `actions/setup-python` 5.6.0 → 7.0.0, `streetsidesoftware/cspell-action`
+  6.11.1 → 9.0.1, `actions/upload-artifact` 4.6.2 → 7.0.1 разом із
+  `actions/download-artifact` 4.3.0 → 8.0.1, `softprops/action-gh-release`
+  2.6.2 → 3.0.3, `vmactions/freebsd-vm` 1.5.5 → 1.5.6. Усі — на Node 24,
+  запінені на commit-SHA. Перевірено сухим прогоном `release.yml`
+  (`workflow_dispatch`) на гілці.
+- Виправлено лічильник у нотатках v0.30: на момент релізу тестів було 208, не 182.
+
 ## v0.30 — 2026-09-12
 
 Другий етап аудиту v0.28.1 (Ansible, тести, док-дрифт) плюс інструмент і
@@ -83,7 +97,8 @@ License:  BSD 3-Clause "New" or "Revised" License
 - Нове покриття (`tests/test_coverage_gaps.py`): `discover_agent` (реєстр
   HTTP/HTTPS, fallback HTTP→HTTPS на кожен порт, нічого не знайдено),
   `auto_discover`, guard-и `sign_data`/`sign_hash` (None, невалідний base64),
-  `pick_sign_mechanism` (порядок, порожній, str-ID). Разом 182 тести.
+  `pick_sign_mechanism` (порядок, порожній, str-ID). Разом 182 тести на
+  момент цього PR; на момент релізу v0.30 — 208 (+26 для `iit_inventory`).
 
 ### Документація
 
