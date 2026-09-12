@@ -1,0 +1,24 @@
+{
+ "schema": 1,
+ "tool": "manual-transcription",
+ "label": "S1-2025-v5",
+ "source": "docs/IIT-ANALYSIS-ADDENDUM-v5.md §1 «Версії і SHA256» (snapshot A, 2025, 32-bit crypto chain)",
+ "packages": [
+  {
+   "label": "v5",
+   "files": [
+    {"name": "CSPBase.dll", "bitness": 32, "size": 1239688, "file_version": "1.1.0.173", "pe_timestamp": "2025-06-18",
+     "sha256": "90973d4f454400f61278380ad149fc13b9e2e6ba1772b23eb2cb4bd4887fc98b"},
+    {"name": "CSPExtension.dll", "bitness": 32, "size": 81424, "file_version": "1.1.0.17", "pe_timestamp": "2023-03-13",
+     "sha256": "c60a3de7719e3ba405c4c6a29097ebbb5442f46a1699a35cd2c3968920a9e562"},
+    {"name": "CSPIBase.dll", "bitness": 32, "size": 1100424, "file_version": "1.0.0.29", "pe_timestamp": "2025-07-19",
+     "sha256": "ab37b21a3c317433c47b53f9353ddd7c66e7200ff29cb88f04f1e4d5d05f836b"},
+    {"name": "PKIFormats.dll", "bitness": 32, "size": 1005704, "file_version": "1.2.0.171", "pe_timestamp": "2025-08-15",
+     "sha256": "25ac050a51827f56c34d3f19bf0dec40c2acf0351b0a94168f02ba7ae02819f5"},
+    {"name": "EUSignCP.dll", "bitness": 32, "size": 1843336, "file_version": "1.3.1.209", "pe_timestamp": "2025-11-03",
+     "exports_count": 619,
+     "sha256": "f61b817adfccba6bc570bcd23da07969efb4bf752ee1ada9207595cee07ffcc3"}
+   ]
+  }
+ ]
+}

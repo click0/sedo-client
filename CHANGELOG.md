@@ -11,6 +11,30 @@ License:  BSD 3-Clause "New" or "Revised" License
 
 Другий етап аудиту v0.28.1: Ansible, тести, док-дрифт.
 
+### Скрипти
+
+- **`scripts/iit_inventory.py`** — інвентаризація DLL/EXE з пакетів IIT без
+  запуску бінарників і без сторонніх бібліотек (власний stdlib PE-парсер):
+  розмір, sha256, бітність, PE-timestamp, FileVersion/CompanyName, експорти
+  (PKCS#11 за `C_GetFunctionList`), імпорти, LoadLibrary-залежності з рядків
+  (ASCII + UTF-16, з придушенням артефакту «sCSPIBase.dll»), `.cap`, на які
+  посилається модуль, OID ДСТУ, `CKM_*` і лічильники 12 IIT mechanism ID як
+  DWORD-констант. Режими: diff проти будь-якої кількості попередніх snapshot
+  (`--baseline`), Markdown-звіт, списки експортів (`--exports-dir`), реєстр
+  «файл × snapshot» (`--registry`). `--engine pefile` — cross-check
+  (`pip install .[analysis]`). 26 тестів на синтетичному PE, без pefile.
+- **`scripts/iit_unpack.sh`** — розпакування інсталяторів за сигнатурою
+  (`.msi` → msiextract, Inno → innoextract, CAB-SFX, 7z/zip, Delphi-обгортка
+  з вбудованим MSI) без запуску.
+- **`docs/inventory/`** — схема зберігання досліджень: `snapshot-a-v5.json`,
+  `snapshot-b-v6.json` (транскрипція таблиць ADDENDUM v5 §1 / v6 §8.1),
+  `S3-2026-07-web_dll.json` (перший реальний snapshot, згенерований скриптом),
+  `exports/<DLL>@<версія>.txt`; `docs/DLL-REGISTRY.md` — згенерована матриця
+  версій/sha256 по snapshot-ах. Бінарники — у `.gitignore` (`*.dll *.exe *.msi
+  *.sys *.cab *.cap *.7z`).
+- `docs/REVERSE-METHODOLOGY.md`: таблиця інструментів і блок «Reproduce» —
+  через ці скрипти.
+
 ### Ansible
 
 - **PIN через `SEDO_PIN`**, а не `--pin` у командному рядку: обидва playbook

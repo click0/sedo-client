@@ -21,7 +21,9 @@ dependencies = [
 [project.optional-dependencies]
 pkcs11 = ["PyKCS11>=1.5.15"]
 test = ["pytest>=7.4"]
-all = ["PyKCS11>=1.5.15", "pytest>=7.4"]
+# Cross-check engine for scripts/iit_inventory.py (the script itself is stdlib-only).
+analysis = ["pefile>=2024.8.26"]
+all = ["PyKCS11>=1.5.15", "pytest>=7.4", "pefile>=2024.8.26"]
 
 [project.scripts]
 sedo-client = "sedo_client:main"
