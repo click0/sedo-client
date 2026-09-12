@@ -85,6 +85,20 @@ License:  BSD 3-Clause "New" or "Revised" License
 
 ### Документація
 
+- **`docs/IIT-ANALYSIS-ADDENDUM-v7.md`** — web-компонент IIT 2026-07 (архів від
+  власника): CSPBase 1.1.0.173 → 1.1.0.174, EUSignCP 1.3.1.209 → 1.3.1.222
+  (619 → 630 експортів), KM.PKCS11 1.0.1.37 → 1.0.1.39 (24 сторонні PKCS#11-модулі
+  в роутері, `0x80420031` підтверджено статично), KM.EKeyAlmaz1C 1.0.1.9 → 1.0.1.13;
+  **PKIFormats 1.2.0.171 — та сама версія, інший бінарник**; нові імена `.cap`
+  (`DSTU4145CacheP2/N2`, `DSTU7624SBox`, `DSTU8845SBox`). Перший addendum,
+  згенерований `scripts/iit_inventory.py` зі snapshot S3.
+- `docs/MINIMUM-FILES-LIST.md`: перелік `.cap` за рядками з CSPBase/EUSignCP 2026;
+  таблиця version drift з колонкою S3 і правилом «звіряй sha256, не версію».
+- `docs/README.md`: v7, `inventory/`, `DLL-REGISTRY.md` в індексі; v6 §3.2 —
+  вказівник на v7.
+- Виправлення до v5 §7: залежності EUSignCP звуться `PDFSecurity.dll` /
+  `XMLSecurity.dll` (без префікса `e` — артефакт `strings`, як і `sCSPIBase.dll`);
+  `slmessages.dll` і `km.dll` обов'язкові.
 - README (обидві мови): «трибекендна» → **чотирибекендна** архітектура
   (opensc / pkcs11 / virtual / iit_agent); у діаграмі й у
   `docs/ARCHITECTURE.md` додано `virtual_signer.py` та обов'язкову

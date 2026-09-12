@@ -26,12 +26,14 @@ PKIFormats.dll              975 KB    v1.2.0.163  ASN.1 / X.509 parser
                            ~2 560 KB
 ```
 
-### Curve parameters (9 `.cap` files, ~2.5 MB)
+### Curve parameters (`.cap` files, ~2.5 MB)
 
 ```
 DSTU4145Parameters.cap      352 B     OID mapping
-DSTU4145CachePB.cap       1 725 KB    Polynomial Basis points
-DSTU4145CacheNB.cap         784 KB    Normal Basis points
+DSTU4145CacheP2.cap       1 725 KB    Polynomial Basis points  (was DSTU4145CachePB.cap in 2023-25 batches)
+DSTU4145CacheN2.cap         784 KB    Normal Basis points      (was DSTU4145CacheNB.cap)
+DSTU7624SBox.cap          1 089 B     Kalyna S-box             (new in 2026 batch, EUSignCP loads it)
+DSTU8845SBox.cap          1 089 B     Strumok S-box            (new in 2026 batch, EUSignCP loads it)
 ECDHParameters.cap          352 B     ECDH params
 ECDSAParameters.cap         572 B     ECDSA params (legacy)
 GOST28147SBox.cap            80 B     GOST 28147 SBOX
@@ -39,6 +41,12 @@ GOST34311Parameters.cap      96 B     GOST 34.311 SBOX
 PRNGParameters.cap           80 B     PRNG init
 RSAParameters.cap            40 B     RSA (legacy)
 ```
+
+The names are what the DLLs actually look for (strings in `CSPBase.dll` 1.1.0.174
+and `EUSignCP.dll` 1.3.1.222 — see `docs/IIT-ANALYSIS-ADDENDUM-v7.md` §7). Take
+the `.cap` set from the **same** installer as the DLLs; whether the two big
+`Cache*` files are still shipped by the 2026 packages must be checked on a live
+install (the web component archive did not contain them).
 
 **Total HW: 4 DLL (~2.5 MB) + 9 `.cap` (~2.5 MB) ≈ 5 MB.** All files must
 be in the same directory.
@@ -118,16 +126,23 @@ Despite older guides, these are **NOT needed** for sedo-client PKCS#11 operation
 
 ## Version drift warning
 
-Two known DLL batches exist:
+Three known DLL batches exist (full matrix: `docs/DLL-REGISTRY.md`,
+generated from `docs/inventory/*.json`):
 
-| DLL | v5 batch (2025) | v6 batch (2023-2024) |
-|---|---|---|
-| CSPBase.dll | 1.1.0.173 (2025-06) | 1.1.0.172 (2023-08) |
-| PKIFormats.dll | 1.2.0.171 (2025-08) | 1.2.0.163 (2024-01) |
-| KM*.dll | — | 2017-09 |
+| DLL | S1 = v5 batch (2025) | S2 = v6 batch (2023-2024) | S3 = web batch (2026-07) |
+|---|---|---|---|
+| CSPBase.dll | 1.1.0.173 (2025-06) | 1.1.0.172 (2023-08) | **1.1.0.174** (2026-06) |
+| PKIFormats.dll | 1.2.0.171 (2025-08) | 1.2.0.163 (2024-01) | 1.2.0.171 (2026-07) — **same version, different sha256** |
+| EUSignCP.dll | 1.3.1.209 (2025-11) | = S1 | **1.3.1.222** (2026-07) |
+| KM.PKCS11.dll | — | 1.0.1.37 (2025-02) | **1.0.1.39** (2026-06) |
+| KM.EKeyAlmaz1C.dll | — | 1.0.1.9 | **1.0.1.13** (2026-07) |
+| KM.dll, KM.FileSystem.dll | — | 2017-09 | not in the web batch |
+| PKCS11.EKeyAlmaz1C.dll | — | 1.0.1.7 | not in the web batch |
 
 Mixing DLLs from different batches may cause version mismatches.
-Use a single snapshot of all files from the same IIT installation.
+Use a single snapshot of all files from the same IIT installation, and
+compare **sha256**, not the version string (PKIFormats 1.2.0.171 exists as two
+different binaries).
 
 ## Verification
 

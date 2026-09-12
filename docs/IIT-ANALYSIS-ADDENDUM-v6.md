@@ -285,6 +285,8 @@ EKAlmaz1CConfiguration.exe     ← GUI config tool
 
 Якщо ж знайдеться новіший snapshot, який МАЄ усі файли — краще його. Повний інсталятор "Користувач ЦСК-1" з https://iit.com.ua/download/productfiles/users дає такий snapshot.
 
+> **Оновлення 2026-09 (v7):** з'явився snapshot S3 (web-компонент 2026-07: CSPBase 1.1.0.174, EUSignCP 1.3.1.222, KM.PKCS11 1.0.1.39), але без PKCS#11-модулів і KM.dll — див. `IIT-ANALYSIS-ADDENDUM-v7.md` §9 і `DLL-REGISTRY.md`.
+
 ---
 
 ## 4. `EKAlmaz1CConfiguration.exe` — GUI конфігуратор

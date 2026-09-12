@@ -37,6 +37,12 @@ Year:     2025-2026
   crypto chain (CSPBase, CSPIBase, PKIFormats, EUSignCP)
 - **[IIT-ANALYSIS-ADDENDUM-v6.md](IIT-ANALYSIS-ADDENDUM-v6.md)** — KM
   architecture, version pinning, production-ready assessment
+- **[IIT-ANALYSIS-ADDENDUM-v7.md](IIT-ANALYSIS-ADDENDUM-v7.md)** — web-компонент
+  2026-07 (EUSignCP 1.3.1.222, CSPBase 1.1.0.174, KM.PKCS11 1.0.1.39), нові `.cap`,
+  snapshot S3; перший addendum, згенерований `scripts/iit_inventory.py`
+- **[inventory/](inventory/README.md)** — snapshot-и бінарників IIT у JSON
+  (S1/S2/S3), списки експортів, як додати наступний;
+  **[DLL-REGISTRY.md](DLL-REGISTRY.md)** — матриця версій/sha256 по snapshot-ах
 - **[MECHANISM-IDS.md](MECHANISM-IDS.md)** — 12 PKCS#11 mechanism IDs з
   прапорцями, DSTU 4145 криві OIDs, таблиця співставлення з avcryptokinxt
 - **[REVERSE-METHODOLOGY.md](REVERSE-METHODOLOGY.md)** — методологія
@@ -52,7 +58,9 @@ Year:     2025-2026
 
 **Хочу зрозуміти як це працює** → [ARCHITECTURE.md](ARCHITECTURE.md)
 
-**Хочу дізнатись про реверс DLL** → [IIT-ANALYSIS.md](IIT-ANALYSIS.md) + ADDENDUM v1-v6
+**Хочу дізнатись про реверс DLL** → [IIT-ANALYSIS.md](IIT-ANALYSIS.md) + ADDENDUM v1-v7
+
+**Вийшла нова версія DLL від IIT** → [inventory/README.md](inventory/README.md) (скрипт інвентаризації + diff)
 
 **Треба точний mechanism ID для PKCS#11** → [MECHANISM-IDS.md](MECHANISM-IDS.md)
 
