@@ -108,7 +108,7 @@ Response body:
 
 ### Step 3: Signature
 JSON-RPC call to local agent:
-Method: "SignData" / "SignHash" / ...
+Method: "Sign" / "SignHash" / "SignFile" ...   (у EUSignRPC 1.3.1.109 немає "SignData")
 Params: [<base64 of challenge>, { ... options }]
 
 ### Step 4: Verify

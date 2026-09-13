@@ -22,6 +22,7 @@ EUSignWeb, драйвер Алмаз-1К). Самі бінарники в git н
 | `snapshot-b-v6.json` | **S2-2023-v6** — 32-bit KM-ланцюжок (PKCS11.EKeyAlmaz1C 1.0.1.7, PKCS11.Virtual 1.0.1.10, KM.*, CSPBase 1.1.0.172, PKIFormats 1.2.0.163…) | ручна транскрипція `docs/IIT-ANALYSIS-ADDENDUM-v6.md` §1.1–1.3, §8.1 |
 | `S3-2026-07-web_dll.json` | **S3-2026-07-web_dll** — архів `Web_dll.7z` від власника (10 DLL + 9 `.cap`, білди 2026-05…07): CSPBase 1.1.0.174, PKIFormats 1.2.0.171 (перезбірка без зміни версії), EUSignCP 1.3.1.222, EUSignRPC 1.3.1.109, KM.PKCS11 1.0.1.39, KM.EKeyAlmaz1C 1.0.1.13 | `scripts/iit_inventory.py` (містить `diffs` проти S1 і S2) |
 | `exports/<DLL>@<версія>.txt` | відсортовані списки експортів критичних модулів — щоб наступного разу можна було точно сказати, які функції додались/зникли | `--exports-dir` |
+| `exports/EUSignRPC.dll@1.3.1.109-methods.txt` | таблиця імен JSON-RPC методів диспетчера (354, у порядку `.rdata`) — джерело каталогу в `PROTOCOL-JSON-RPC.md` | `strings -n 3` + суцільний блок навколо `GetOwnCertificate` |
 | `../DLL-REGISTRY.md` | матриця «файл × snapshot»: версія · build · sha256 | `--registry` |
 
 Мітка snapshot: `S<n>-<рік-місяць білдів>-<джерело>`. Наступний — `S4-…`.

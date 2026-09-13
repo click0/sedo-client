@@ -456,14 +456,27 @@ class IITClient:
         import base64
         data_b64 = base64.b64encode(data).decode()
         opts = options or {"internal": True}  # detached = False
-        result = self.call("SignData", [data_b64, opts])
+        # Method table of EUSignRPC.dll 1.3.1.109 (docs/inventory/exports/
+        # EUSignRPC.dll@1.3.1.109-methods.txt) has "Sign" / "SignHash" /
+        # "SignFile" — no "SignData" (the dispatcher drops the "Data" suffix:
+        # EUSignData → Sign, EUVerifyData → Verify, EUEnvelopData → Envelop).
+        # Keep "SignData" as a fallback for older agents that may still expose it.
+        method = "Sign"
+        try:
+            result = self.call(method, [data_b64, opts])
+        except IITRPCError as e:
+            if e.code != -32601:  # Requested method not found
+                raise
+            log.info("Agent has no 'Sign' method (%s), retrying as 'SignData'", e.message)
+            method = "SignData"
+            result = self.call(method, [data_b64, opts])
         if isinstance(result, str):
             try:
                 return base64.b64decode(result)
             except Exception as e:
-                raise IITRPCError(-1, f"SignData returned invalid base64: {e}") from e
+                raise IITRPCError(-1, f"{method} returned invalid base64: {e}") from e
         if result is None:
-            raise IITRPCError(-1, "SignData returned empty result")
+            raise IITRPCError(-1, f"{method} returned empty result")
         return result
 
     def sign_hash(self, hash_value: bytes) -> bytes:
