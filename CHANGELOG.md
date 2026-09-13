@@ -9,6 +9,26 @@ License:  BSD 3-Clause "New" or "Revised" License
 
 ## v0.31 — unreleased
 
+### Виправлено
+
+- **`iit_client.sign_data()` викликав неіснуючий RPC-метод `SignData`.** Таблиця
+  методів `EUSignRPC.dll` 1.3.1.109 (354 імені, витягнуто з `.rdata`) містить
+  `Sign`, `SignHash`, `SignFile`, `SignInternal` — диспетчер відкидає суфікс
+  `Data` (`EUSignData` → `Sign`, `EUVerifyData` → `Verify`). Тепер викликається
+  `Sign`; на `-32601` (method not found) — fallback на `SignData` для старих
+  агентів. +2 тести. Живий agent-backend ще не перевірявся (потрібен Windows
+  з «Користувач ЦСК»).
+
+### Документація
+
+- `docs/PROTOCOL-JSON-RPC.md`: каталог методів переписано за реальною таблицею
+  1.3.1.109 (сім'ї, лічильники, правило іменування); вгадані імена
+  (`SignData`, `VerifyData`, `EnvelopData`, `GetTSPStamp`, `OCSPCheckCertificate`,
+  `DeletePrivateKey`, `AddCertificate`…) прибрано, `DestroyPrivateKey` позначено.
+  Повний список — `docs/inventory/exports/EUSignRPC.dll@1.3.1.109-methods.txt`.
+  `IIT-ANALYSIS.md` §авторизація і `FIDDLER-CAPTURE-GUIDE.md` — `Sign` замість
+  `SignData`.
+
 ### CI
 
 - Усі GitHub Actions підняті до актуальних мажорних версій одним PR

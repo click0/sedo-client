@@ -64,7 +64,7 @@ class TestJSONRPCProtocol:
 
         client = IITClient(port=9100)
         client._session_id = "test-session-123"
-        client.call("SignData", [b"hello".hex()])
+        client.call("Sign", [b"hello".hex()])
 
         payload = mock_session.post.call_args.kwargs["json"]
         assert payload["session_id"] == "test-session-123"

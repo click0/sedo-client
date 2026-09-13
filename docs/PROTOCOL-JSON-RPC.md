@@ -140,8 +140,11 @@ Authentication error (authentication data corrupted)
           ...
         }
 
-9. SignData(b64_data, {internal: true})
+9. Sign(b64_data, {internal: true})
       → "<base64 CMS SignedData>"
+      // у таблиці методів EUSignRPC 1.3.1.109 є "Sign", "SignHash", "SignFile",
+      // "SignInternal" — методу "SignData" немає; iit_client пробує "Sign",
+      // а на -32601 (method not found) — "SignData" для старих агентів
 
 10. ResetPrivateKey()
       → true
@@ -150,58 +153,94 @@ Authentication error (authentication data corrupted)
       → true
 ```
 
-## Каталог методів (вибіркова)
+## Каталог методів (EUSignRPC.dll 1.3.1.109, 2026-07)
 
-EUSignRPC диспетчер містить ~500 методів. Найважливіші:
+Таблиця імен методів витягнута з `.rdata` диспетчера (суцільний блок ASCII-рядків
+поруч із `Initialize`/`Finalize`): **354 записи**, повний список —
+`docs/inventory/exports/EUSignRPC.dll@1.3.1.109-methods.txt`. Правило іменування:
+RPC-метод = експорт `EUSignCP` без префікса `EU` і без суфікса `Data`
+(`EUSignData` → `Sign`, `EUVerifyData` → `Verify`, `EUEnvelopData` → `Envelop`,
+`EUSignHash` → `SignHash`). Раніше в цьому документі стояли вгадані імена
+(`SignData`, `VerifyData`, `EnvelopData`, `GetTSPStamp`, `OCSPCheckCertificate`,
+`DeletePrivateKey`, `AddCertificate`…) — **їх у таблиці немає**. Сигнатури
+параметрів нижче — з JS-віджета ІІТ і Fiddler-нотаток, не з бінарника.
 
-### Ініціалізація
-- `Initialize()` — ініціалізує бібліотеку
-- `Finalize()` — звільняє ресурси
-- `SetUIMode(bool)` — GUI prompts on/off
-- `IsInitialized()` → bool
-- `GetVersion()` → "1.3.x"
-- `GetHostInfo()` → {os, arch, ...}
+Відтворити: `strings -n 3 EUSignRPC.dll`, взяти суцільний блок ідентифікаторів
+навколо `GetOwnCertificate` (у 1.3.1.109 — рядки 5268–5621 виводу `strings`).
 
-### Ключі та токени
-- `EnumKeyMediaDevices()` → list
-- `EnumKeyMediaTypes()` → list
-- `GetKeyMediaType(devIndex)` → type info
-- `ReadPrivateKey(device, pin)` → bool
-- `ReadPrivateKeyByIndex(...)` → variant
-- `IsPrivateKeyReaded()` → bool
-- `ResetPrivateKey()` → bool
-- `ChangePrivateKeyPassword(old, new)` → bool
-- `DeletePrivateKey(device)` → bool  // ⚠️ знищує ключ!
+### Ініціалізація (7)
+- `Initialize()`, `Finalize()`, `IsInitialized()` → bool
+- `SetUIMode(bool)`, `GetVersion()` → "1.3.x", `GetHostInfo()` → {os, arch, …}
+- `ResetOperation()`, `ResetOperationCtx()`
 
-### Сертифікати
-- `EnumOwnCertificates()` → list
-- `GetOwnCertificate(index)` → cert with metadata
-- `GetCertificateInfo(cert)` → detailed info
-- `GetCertificate(issuer, serial)` → cert
-- `AddCertificate(cert, isCA)` → bool
-- `DeleteCertificate(serial, issuer)` → bool
+### Носії ключів і приватний ключ (35)
+- `EnumKeyMediaDevices()`, `EnumKeyMediaTypes()`, `GetKeyMediaDevices()`,
+  `GetKeyMediaTypes()`, `GetKeyMediaDeviceInfo()`, `IsHardwareKeyMedia()`
+- `ReadPrivateKey(device, pin)`, `ReadPrivateKeySilently()`, `ReadPrivateKeyFile()`,
+  `ReadPrivateKeyBinary()`, `IsPrivateKeyReaded()` → bool, `ResetPrivateKey()`
+- `ChangePrivateKeyPassword()`, `ChangeSoftwarePrivateKeyPassword()`,
+  `GetPrivateKeyOwnerInfo()`, `IsPrivateKeyExists()`, `BackupPrivateKey()`,
+  **`DestroyPrivateKey()`** ⚠️ знищує ключ (не `DeletePrivateKey`)
+- `GeneratePrivateKeyEx()`, `GetJKSPrivateKey*()`, `EnumJKSPrivateKeys*()`,
+  `SetKeyMediaPassword()`, `SetKeyMediaUserPassword()`, `Get/SetKeyMediaSettings()`
+- `Ctx*`: `CtxReadPrivateKey()`, `CtxReadPrivateKeyBinary()`, `CtxFreePrivateKey()`,
+  `CtxEnumPrivateKeyInfo()`, `CtxExportPrivateKeyPFXContainer()`
+- `SServerClient*` (6): серверний підпис/генерація ключа, async + `Check*Status`
 
-### Підпис
-- `SignData(data, options)` → signature
-- `SignHash(hash, options)` → signature
-- `SignFile(path, options)` → signature
-- `SignDataWithTSP(data, options)` → signature + TSP
-- `AppendSign(existing_sig, new_key)` → combined signature
+### Сертифікати (23)
+- `EnumOwnCertificates()`, `GetOwnCertificate(index)` → {data: hex DER, subjCN, …},
+  `ShowOwnCertificate()`
+- `GetCertificate()`, `GetCertificateInfo()`, `GetCertificateInfoEx()`,
+  `GetCertificates()`, `GetCertificatesCount()`, `EnumCertificates()`,
+  `ShowCertificates()`, `SelectCertificateInfo()`
+- `GetCertificateByKeyInfo()`, `GetCertificatesByKeyInfo()`, `GetCertificateByFingerprint()`,
+  `GetCertificateByEmail()`, `GetCertificateByNBUCode()`,
+  `GetCertificatesByEDRPOUAndDRFOCode()`, `GetCertificatesFromLDAPByEDRPOUCode()`
+- `GetSignerCertificate()`, `GetFileSignerCertificate()`,
+  `GetCertificateFromSignedData()`, `GetCertificateFromSignedFile()`,
+  `GetReceiversCertificates()`
 
-### Верифікація
-- `VerifyData(data, signature, cert)` → bool
-- `VerifyHash(hash, signature, cert)` → bool
-- `VerifySignedFile(path)` → verification result
+### Підпис (8 + Ctx/Raw/Append)
+- **`Sign(b64_data, options)`** → base64 CMS — те, що викликає `iit_client.sign_data`
+- `SignHash(b64_hash)`, `SignFile(path)`, `SignInternal()`,
+  `SignRSA()`, `SignHashRSA()`, `SignRSAFile()`, `SignECDSA()`
+- потокові: `ContinueSign()`, `EndSign()` (+ `*Ctx`, `*RSA*`)
+- `AppendSign()`, `AppendSignHash()`, `AppendSignFile()`, `AppendSigner()`,
+  `AppendValidationDataToSignerEx()`, `CreateSignerEx()`, `CreateEmptySign()`
+- `RawSign()`, `RawSignHash()`, `RawSignFile()`; `CtxSign()`, `CtxSignHash()`,
+  `CtxSignFile()`, `CtxAppendSign*()`
+- контейнери: `ASiC*` (12), `XAdES*` (9), `PDF*` (6), `CtxASiC*`, `CtxXAdES*`, `CtxPDF*`
+- `NBUSign()` / `NBUVerify()`
 
-### Шифрування
-- `EncryptData(data, cert)` → encrypted
-- `DecryptData(encrypted)` → data
-- `EnvelopData(data, recipients)` → enveloped
+### Верифікація (14 + Raw/Ctx)
+- **`Verify(b64_data, b64_sign)`** (не `VerifyData`), `VerifyHash()`, `VerifyFile()`,
+  `VerifyInternal()`, `VerifySpecific*()`, `VerifyDataOnTimeEx()`, `VerifyFileOnTimeEx()`,
+  `VerifyHashOnTimeEx()`, `VerifyDataInternalOnTimeEx()`
+- потокові: `BeginVerify()`, `ContinueVerify()`, `EndVerify()` (+ `*Ctx`)
+- `RawVerify()`, `RawVerifyHash()`, `RawVerifyFile()`
+- інформація: `GetSignerInfo()`, `GetFileSignerInfo()`, `GetSignsCount()`,
+  `GetFileSignsCount()`, `GetSignTimeInfo()`, `GetSignType()`, `IsSigned()`,
+  `IsSignedFile()`, `IsAlreadySigned()`, `IsDataInSignedDataAvailable()`…
 
-### Тайм-стемпи та OCSP
-- `GetTSPStamp(hash)` → TSP response
-- `OCSPCheckCertificate(cert)` → status
-- `CMPGetCertificate(request)` → cert
+### Шифрування (18 + 3 + Raw)
+- **`Envelop(b64_data, recipients)`** (не `EnvelopData`), `EnvelopEx()`, `EnvelopFile()`,
+  `EnvelopToRecipients*()`, `Envelop*RSA*()`, `Envelop*WithDynamicKey()`,
+  `EnvelopToRecipientsWithOCode()`, `EnvelopToRecipientsWithSettings()`
+- `Develop()`, `DevelopEx()`, `DevelopFile()`; `RawEnvelop()`, `RawDevelop()`
+- `ProtectDataByPassword()` / `UnprotectDataByPassword()`
+- сесії: `ClientSessionCreateStep1/2()`, `ServerSessionCreate*()`,
+  `SessionEncrypt()`, `SessionDecrypt()`, `SessionLoad()`, `SessionSave()`…
+
+### TSP / OCSP / CMP / налаштування (17)
+- `CheckTSP()`, `GetTSPByAccessInfo()`, `Get/SetTSPSettings()`
+- `CheckOCSPResponse()`, `GetOCSPResponseByAccessInfo()`, `Get/SetOCSPSettings()`,
+  `*OCSPAccessInfoSettings()`, `*OCSPAccessInfoModeSettings()`, `SetOCSPResponseExpireTime()`
+- `Get/SetCMPSettings()`, `Get/SetProxySettings()`, `Get/SetLDAPSettings()`,
+  `Get/SetModeSettings()`, `Get/SetFileStoreSettings()`, `SetSettings()`, `SaveSettings()`
+- хеш: `Hash()`, `HashFile()`, `ContinueHash()`, `EndHash()`, `GetDataHashFromSigned*()`
+
+Три останні записи таблиці (`ProxyType`, `SaveSettings`, `StringEncoding`) можуть
+бути ключами налаштувань, а не методами — межа блоку визначена евристично.
 
 ## 110+ JSON полів сертифіката
 
@@ -289,7 +328,7 @@ data = b"hello world"
 r = requests.post(url, headers=headers, json={
     "jsonrpc": "2.0",
     "id": 3,
-    "method": "SignData",
+    "method": "Sign",   # не "SignData" — див. каталог методів
     "params": [
         base64.b64encode(data).decode(),
         {"internal": True}  # CAdES-BES

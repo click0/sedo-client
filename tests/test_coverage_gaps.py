@@ -88,11 +88,26 @@ class TestSignResultGuards:
         out = getattr(_client_returning(base64.b64encode(sig).decode()), method)(b"x")
         assert out == sig
 
-    def test_sign_data_sends_base64_and_options(self):
+    def test_sign_data_calls_sign_with_base64_and_options(self):
+        """EUSignRPC 1.3.1.109 exposes 'Sign', not 'SignData'."""
         c = _client_returning(base64.b64encode(b"s").decode())
         c.sign_data(b"hello", {"internal": False})
         c.call.assert_called_once_with(
-            "SignData", [base64.b64encode(b"hello").decode(), {"internal": False}])
+            "Sign", [base64.b64encode(b"hello").decode(), {"internal": False}])
+
+    def test_sign_data_falls_back_to_signdata_on_method_not_found(self):
+        c = IITClient()
+        sig_b64 = base64.b64encode(b"sig").decode()
+        c.call = MagicMock(side_effect=[IITRPCError(-32601, "Requested method not found"), sig_b64])
+        assert c.sign_data(b"hello") == b"sig"
+        assert [k.args[0] for k in c.call.call_args_list] == ["Sign", "SignData"]
+
+    def test_sign_data_other_rpc_errors_propagate(self):
+        c = IITClient()
+        c.call = MagicMock(side_effect=IITRPCError(-32603, "Internal rpc error"))
+        with pytest.raises(IITRPCError, match="Internal rpc error"):
+            c.sign_data(b"hello")
+        c.call.assert_called_once()
 
 
 # ─── pick_sign_mechanism ────────────────────────────────────

@@ -170,7 +170,7 @@ HKEY_LOCAL_MACHINE\SOFTWARE\Institute of Informational Technologies\Certificate 
 7. IsPrivateKeyReaded()         — перевірка успіху
 8. EnumOwnCertificates()        — перелік сертів
 9. GetOwnCertificate(idx)       — повний сертифікат
-10. SignData(data, opts)         — підпис challenge від СЕДО
+10. Sign(data, opts)             — підпис challenge від СЕДО (у RPC 1.3.1.109 метод зветься Sign, не SignData)
     — або SignHash(hash)         — якщо вже відомий хеш
 11. ResetPrivateKey()           — logout
 12. Finalize()
@@ -401,7 +401,7 @@ class IITClient:
         return certs
 
     def sign(self, data: bytes):
-        return self.call("SignData", [data.hex(), {...}])
+        return self.call("Sign", [data.hex(), {...}])  # RPC-метод "Sign" (не "SignData")
 ```
 
 **Ansible змінюється** — замість Selenium (який я пропонував) викликаємо Python напряму на Windows worker:
