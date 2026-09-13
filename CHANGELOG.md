@@ -28,6 +28,10 @@ License:  BSD 3-Clause "New" or "Revised" License
   Повний список — `docs/inventory/exports/EUSignRPC.dll@1.3.1.109-methods.txt`.
   `IIT-ANALYSIS.md` §авторизація і `FIDDLER-CAPTURE-GUIDE.md` — `Sign` замість
   `SignData`.
+- ADDENDUM v7 / MINIMUM-FILES-LIST: уточнено, що архів `Web_dll.7z` — це всі
+  файли, що змінилися в оновленні 2026; PKCS#11-модулі, CSPExtension, CSPIBase,
+  KM.dll, KM.FileSystem не змінились і лишаються зі snapshot S2. Повний набір для
+  деплою = S3 + незмінені файли S2; окремий S4 з інсталяторів не потрібен.
 
 ### CI
 

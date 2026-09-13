@@ -33,10 +33,12 @@ Year:     2025-2026
    (Струмок). Наш перелік файлів для деплою оновлено (§8).
 4. ✅ **`KM.PKCS11.dll` статично містить `0x80420031`** (3 входження), `0x80420032` —
    ні. Головний sign-механізм sedo-client підтверджено ще раз, але статично.
-5. ❌ У пакеті **немає** `PKCS11.EKeyAlmaz1C.dll`, `PKCS11.Virtual.EKeyAlmaz1C.dll`,
-   `CSPExtension.dll`, `CSPIBase.dll`, `KM.dll`, `KM.FileSystem.dll`, `EUSignAgent.exe` —
-   для деплою sedo-client цей batch **неповний**; змішувати його з S2 (2023) — той самий
-   version drift, що описаний у v6 §3.2.
+5. ℹ️ Архів — це **лише файли, що змінилися** в оновленні (за словами власника —
+   всі свіжі DLL). `PKCS11.EKeyAlmaz1C.dll`, `PKCS11.Virtual.EKeyAlmaz1C.dll`,
+   `CSPExtension.dll`, `CSPIBase.dll`, `KM.dll`, `KM.FileSystem.dll` в оновлення не
+   входили, тобто лишаються версіями зі snapshot S2/S1 (1.0.1.7 / 1.0.1.10 /
+   1.1.0.17 / 1.0.0.29 / 1.0.1.1 / 1.0.1.2). Повний робочий набір = S3 + незмінені
+   файли з S2 — саме так і рахує `docs/DLL-REGISTRY.md` (у колонці S3 вони «—»).
 
 ---
 
@@ -102,8 +104,8 @@ PDB-шляхи (лишились у бінарниках): `d:\CryptoServiceProv
 | `KM.PKCS11.dll` | — | 1.0.1.37 · 2025-02-28 | **1.0.1.39 · 2026-06-27** | `90731561…f84fb3` |
 | `KM.EKeyAlmaz1C.dll` | — | 1.0.1.9 (32-bit) | **1.0.1.13 · 2026-07-31** | `de7dc0c8…5324ee` |
 | `NCHostCP.dll` | — | — | — · 2026-05-28 | `f1e539c1…8ad65f` |
-| `CSPExtension.dll`, `CSPIBase.dll` | є | є | **немає** | |
-| `PKCS11.EKeyAlmaz1C.dll`, `PKCS11.Virtual…`, `KM.dll`, `KM.FileSystem.dll` | — | є | **немає** | |
+| `CSPExtension.dll`, `CSPIBase.dll` | 1.1.0.17 / 1.0.0.29 | = S1 | не змінились (лишаються з S1/S2) | |
+| `PKCS11.EKeyAlmaz1C.dll`, `PKCS11.Virtual…`, `KM.dll`, `KM.FileSystem.dll` | — | 1.0.1.7 / 1.0.1.10 / 1.0.1.1 / 1.0.1.2 | не змінились (лишаються з S2) | |
 
 Повна матриця по всіх файлах — `docs/DLL-REGISTRY.md`.
 
@@ -183,8 +185,10 @@ RTTI-класи ті самі, що у v6 §2.2 (`EKeyAlmaz1CHardware`, `Virtual
 
 В архіві є всі 8 файлів зі списку EUSignCP плюс `GOST34311Parameters.cap`, але **немає
 `DSTU4145CacheP2/N2.cap`** — великих кешів точок кривих (у S1/S2 вони звались `CachePB` /
-`CacheNB`, 1.7 MB + 784 KB). Або web-компонент їх не постачає (обчислює кеш сам), або
-власник не включив їх в архів. Для деплою треба перевірити на живому інсталяторі.
+`CacheNB`, 1.7 MB + 784 KB). Оскільки архів містить лише змінені файли, кеші або не
+змінились і лежать в інсталяції під старими/новими іменами, або CSPBase 1.1.0.174
+обчислює їх сам. Перевірити на живій інсталяції: чи є поруч із `CSPBase.dll` файли
+`DSTU4145CacheP2.cap` / `DSTU4145CacheN2.cap` (§9.2).
 
 ## 8. Наслідки для документів і коду
 
@@ -202,13 +206,12 @@ RTTI-класи ті самі, що у v6 §2.2 (`EKeyAlmaz1CHardware`, `Virtual
 
 ## 9. Рекомендація і що перевірити live
 
-1. **Не деплоїти S3 самостійно** — у ньому немає PKCS#11-модулів, `CSPExtension`,
-   `CSPIBase`, `KM.dll`, `KM.FileSystem.dll`. Потрібен повний snapshot з одного
-   інсталятора: `EUInstall.msi` (2026-08-27) + `EKAlmaz1CInstall.msi` (2026-09-09) з
-   `https://iit.com.ua/download/productfiles/` → `scripts/iit_unpack.sh` →
-   `iit_inventory.py --baseline docs/inventory/S3-2026-07-web_dll.json`. Якщо в них
-   CSPBase 1.1.0.174 / PKIFormats sha `e9011e94…` / EUSignCP 1.3.1.222 — це один випуск,
-   і його можна брати цілком (S4).
+1. **Робочий набір для деплою = S3 + незмінені файли з S2**: 10 DLL і 9 `.cap` з
+   архіву плюс `PKCS11.EKeyAlmaz1C.dll` 1.0.1.7, `PKCS11.Virtual.EKeyAlmaz1C.dll`
+   1.0.1.10, `CSPExtension.dll` 1.1.0.17, `CSPIBase.dll` 1.0.0.29, `KM.dll` 1.0.1.1,
+   `KM.FileSystem.dll` 1.0.1.2 (sha256 — v6 §8.1 / `DLL-REGISTRY.md`). Це і є
+   поточний snapshot інсталяції власника; окремо витягати інсталятори з iit.com.ua
+   не потрібно.
 2. **Live на Windows** (`opensc-test-almaz.ps1`, `scripts/smoke_test.py`,
    `pkcs11-tool --module PKCS11.EKeyAlmaz1C.dll --list-mechanisms`): чи лишились
    `0x80420031/32` з `sign, verify, EC F_2M` після оновлення драйвера; чи потрібні

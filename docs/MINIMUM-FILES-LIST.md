@@ -136,8 +136,8 @@ generated from `docs/inventory/*.json`):
 | EUSignCP.dll | 1.3.1.209 (2025-11) | = S1 | **1.3.1.222** (2026-07) |
 | KM.PKCS11.dll | — | 1.0.1.37 (2025-02) | **1.0.1.39** (2026-06) |
 | KM.EKeyAlmaz1C.dll | — | 1.0.1.9 | **1.0.1.13** (2026-07) |
-| KM.dll, KM.FileSystem.dll | — | 2017-09 | not in the web batch |
-| PKCS11.EKeyAlmaz1C.dll | — | 1.0.1.7 | not in the web batch |
+| KM.dll, KM.FileSystem.dll | — | 2017-09 | unchanged in the 2026 update (= S2) |
+| PKCS11.EKeyAlmaz1C.dll | — | 1.0.1.7 | unchanged in the 2026 update (= S2) |
 
 Mixing DLLs from different batches may cause version mismatches.
 Use a single snapshot of all files from the same IIT installation, and
