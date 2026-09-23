@@ -272,8 +272,11 @@ class TestFlowDirectKEP:
         verify = MagicMock(ok=True, status_code=200)
         client.session.post.side_effect = [init, verify]
 
+        signed = []
+        signer.sign = lambda data: signed.append(data) or b"\x00" * 64
         assert client._flow_direct_kep(b"cert") is True
         # signer.sign must have been called with the decoded challenge
+        assert signed == [b"challenge-bytes"]
         assert client.session.post.call_count == 2
         # verify URL ends with /verify
         verify_call = client.session.post.call_args_list[1]

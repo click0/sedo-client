@@ -212,10 +212,23 @@ class TestSEDOClientURL:
         from sedo_client import SEDO_MOD_URL
         assert SEDO_MOD_URL == "https://sedo.mod.gov.ua"
 
-    def test_sedo_client_origin_header(self):
-        """Перевіряє що SEDOClient ставить Origin = sedo.mod.gov.ua."""
+    def test_agent_origin_header_is_the_sedo_url(self):
+        """The agent checks Origin against TrustedSites: it must be SEDO's URL.
+
+        SEDOClient itself sends no Origin; it hands its URL to the agent client
+        (auto_discover(origin=…)), which puts it on every JSON-RPC request.
+        """
         from sedo_client import SEDOClient
-        # Just test module-level default without instantiating
-        # (instantiation would need a backend which needs agent)
+        built = {}
+
+        def fake_discover(**kwargs):
+            built["client"] = IITClient(port=8081, **kwargs)
+            return built["client"]
+
+        with patch("iit_client.IITClient.auto_discover", side_effect=fake_discover):
+            SEDOClient(sedo_url="https://sedo.mod.gov.ua/", backend="iit_agent")
+        assert built["client"].session.headers["Origin"] == "https://sedo.mod.gov.ua"
+
+    def test_iit_client_default_origin(self):
         from sedo_client import SEDO_MOD_URL
-        assert SEDO_MOD_URL.endswith("sedo.mod.gov.ua")
+        assert IITClient().session.headers["Origin"] == SEDO_MOD_URL

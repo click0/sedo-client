@@ -17,6 +17,11 @@ SCRIPT = ROOT / "scripts" / "iit_inventory.py"
 
 
 def _load():
+    # One module object for the whole session: test_p1_tools / test_p2_tools
+    # load the same script, and two different "iit_inventory" modules would
+    # replace each other in sys.modules (dataclasses resolve through it).
+    if "iit_inventory" in sys.modules:
+        return sys.modules["iit_inventory"]
     spec = importlib.util.spec_from_file_location("iit_inventory", SCRIPT)
     mod = importlib.util.module_from_spec(spec)
     sys.modules["iit_inventory"] = mod  # dataclasses resolve annotations via sys.modules
@@ -89,7 +94,21 @@ def _tiny_pe(bitness=32, exports=("C_GetFunctionList", "C_Initialize", "EUInit")
     desc = b"".join(struct.pack("<IIIII", t, 0, 0, n, t) for t, n in zip(thunks, imp_names))
     import_dir_rva = put(desc + b"\0" * 20)
     import_size = len(desc) + 20
-    put(_vs_versioninfo(version))
+    ver_blob = _vs_versioninfo(version)
+    ver_rva = put(ver_blob)
+    # .rsrc tree for RT_VERSION: root → type 16 → name 1 → lang 0x409 → data
+    # entry. Offsets inside the tree are relative to the root directory.
+    def res_dir(entries):
+        return struct.pack("<IIHHHH", 0, 0, 0, 0, 0, len(entries)) + b"".join(
+            struct.pack("<II", i, o) for i, o in entries)
+    root_len = type_len = name_len = 16 + 8
+    lang_off = root_len + type_len
+    data_entry_off = lang_off + name_len
+    rsrc = (res_dir([(16, 0x80000000 | root_len)])
+            + res_dir([(1, 0x80000000 | lang_off)])
+            + res_dir([(0x409, data_entry_off)])
+            + struct.pack("<IIII", ver_rva, len(ver_blob), 0, 0))
+    rsrc_rva = put(rsrc)
     put(extra, 1)
     put(b"\xC3", 1)  # dummy function body
     raw_size = _align(len(blob), 0x200)
@@ -103,6 +122,7 @@ def _tiny_pe(bitness=32, exports=("C_GetFunctionList", "C_Initialize", "EUInit")
     dirs = [(0, 0)] * 16
     dirs[0] = (export_dir_rva, export_size)
     dirs[1] = (import_dir_rva, import_size)
+    dirs[2] = (rsrc_rva, len(rsrc))
     dirs_b = b"".join(struct.pack("<II", *d) for d in dirs)
     if bitness == 64:
         opt = struct.pack("<HBBIIIII", 0x20B, 14, 0, raw_size, 0, 0, sec_rva + 0x3F0, sec_rva)
@@ -191,8 +211,7 @@ class TestScan:
         assert c["mech_dword_all_present"] is False
 
     def test_mechanism_ids_in_sync_with_module(self):
-        sys.path.insert(0, str(ROOT))
-        from mechanism_ids import IIT_MECHANISMS
+        from mechanism_ids import IIT_MECHANISMS  # conftest puts ROOT on sys.path
         assert set(inv.IIT_MECHANISM_IDS) == set(IIT_MECHANISMS)
         assert len(inv.IIT_MECHANISM_IDS) == 12
 
@@ -324,7 +343,10 @@ class TestRender:
         assert "1.0.1.5 → 1.0.1.7" in md
         assert "Diff vs A" in md and "Усі файли" in md
         assert "DSTU4145CacheP2.cap" in md
-        assert "sha256" not in md.split("SHA256 критичних файлів")[1][:5]  # code block, not table
+        # The SHA256 section is a sha256sum-style code block, not a table.
+        after = md.split("SHA256 критичних файлів", 1)[1].lstrip("\n")
+        assert after.startswith("```\n")
+        assert "|" not in after.split("```", 2)[1]
 
     def test_registry_matrix(self):
         s1 = _snap("S1", [{"name": "CSPBase.dll", "sha256": "a" * 64, "file_version": "1.1.0.173", "pe_timestamp": "2025-06-18"}])
