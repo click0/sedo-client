@@ -383,7 +383,10 @@ License:  BSD 3-Clause "New" or "Revised" License
   stdlib-парсера з `pefile` вперше виконується в CI, раніше вона завжди
   пропускалась.
 - `release.yml` на тегу також збирає wheel, ставить його і запускає
-  `sedo-client --help`.
+  `sedo-client --help`. В обох воркфлоу wheel ставиться з
+  `--force-reinstall --no-deps`, бо пакет уже встановлено з дерева
+  (`.[test,analysis]`), і без цього pip мовчки пропускав wheel. Перевірка
+  «wheel встановлюється» тоді нічого не перевіряла.
 - Spellcheck перевіряє й `*.sh`. `opensc-test-almaz.ps1` лишається поза
   перевіркою, бо він у CP1251.
 - **Dependabot:**
