@@ -9,7 +9,10 @@ License:  BSD 3-Clause "New" or "Revised" License
 Year:     2025-2026
 """
 
+import base64
+import binascii
 import logging
+import re
 import sys
 from typing import Any, Optional
 
@@ -295,6 +298,68 @@ RPC_ERRORS = {
 }
 
 
+_HEX_RE = re.compile(r"^(?:[0-9A-Fa-f]{2})+$")
+# Keys an agent may wrap the blob in, most specific first.
+_SIGNATURE_KEYS = ("signature", "sign", "data", "value", "result")
+
+
+def _decode_signature(method: str, result: Any, expect_der: bool) -> bytes:
+    """
+    Normalise whatever the agent returned for a signing call to raw bytes.
+
+    Two defects this replaces:
+    - A dict result (``{"signature": "..."}``) was returned as-is, violating
+      ``-> bytes``; the caller's base64.b64encode() then raised TypeError,
+      which no except clause catches.
+    - A hex result was decoded as base64. Every hex digit is in the base64
+      alphabet, so that "worked" and produced garbage the server rejects with
+      no hint why. The same agent returns certificates as hex, so hex is
+      tried first — base64 of DER starts with 'M', never a hex digit, so
+      there is no ambiguity for CMS output.
+
+    ``expect_der`` enforces the SEQUENCE tag for CMS SignedData; a raw DSTU
+    4145 signature (SignHash) is not DER and is not checked.
+    """
+    if isinstance(result, dict):
+        for key in _SIGNATURE_KEYS:
+            value = result.get(key)
+            if isinstance(value, (str, bytes, bytearray)) and value:
+                result = value
+                break
+        else:
+            raise IITRPCError(
+                -1, f"{method} returned an object without a signature field "
+                    f"(keys: {sorted(result)})")
+
+    if result is None:
+        raise IITRPCError(-1, f"{method} returned empty result")
+    if isinstance(result, (bytes, bytearray)):
+        blob = bytes(result)
+    elif isinstance(result, str):
+        text = "".join(result.split())  # MIME-wrapped base64 has newlines
+        blob = None
+        if _HEX_RE.match(text):
+            candidate = bytes.fromhex(text)
+            if not expect_der or candidate[:1] == b"\x30":
+                blob = candidate
+        if blob is None:
+            try:
+                blob = base64.b64decode(text, validate=True)
+            except (binascii.Error, ValueError) as e:
+                raise IITRPCError(-1, f"{method} returned invalid base64: {e}") from e
+    else:
+        raise IITRPCError(
+            -1, f"{method} returned unexpected type {type(result).__name__}")
+
+    if not blob:
+        raise IITRPCError(-1, f"{method} returned empty result")
+    if expect_der and blob[:1] != b"\x30":
+        raise IITRPCError(
+            -1, f"{method} result is not DER CMS (first byte 0x{blob[0]:02x}); "
+                "the agent may use an encoding this client does not know")
+    return blob
+
+
 # ═══════════════════════════════════════════════════════════════
 # Клієнт
 # ═══════════════════════════════════════════════════════════════
@@ -393,11 +458,31 @@ class IITClient:
         except ValueError as e:
             raise IITRPCError(-1, f"Agent returned non-JSON: {body}") from e
 
-        if "error" in data and data["error"] is not None:
-            err = data["error"]
-            raise IITRPCError(err.get("code", -1),
-                              err.get("message", "Unknown error"),
-                              err.get("data"))
+        # Everything below does .get() on the envelope and on "error". A list or
+        # a bare string there used to escape as AttributeError — outside every
+        # except IITError, so e.g. sign_data's -32601 → "SignData" fallback was
+        # unreachable and the whole run died with "'str' object has no
+        # attribute 'get'". Normalise to IITRPCError instead.
+        if not isinstance(data, dict):
+            raise IITRPCError(-1, f"Agent returned non-object JSON ({type(data).__name__})")
+
+        err = data.get("error")
+        if err is not None:
+            if isinstance(err, dict):
+                code = err.get("code", -1)
+                message = err.get("message", "Unknown error")
+                err_data = err.get("data")
+            else:
+                code, message, err_data = -1, str(err), None
+            try:
+                code = int(code)
+            except (TypeError, ValueError):
+                code = -1
+            # An agent that reports the error as a bare string still means
+            # "method not found" — keep the -32601 contract callers rely on.
+            if code == -1 and "method not found" in str(message).lower():
+                code = -32601
+            raise IITRPCError(code, str(message), err_data)
 
         result = data.get("result")
 
@@ -505,7 +590,6 @@ class IITClient:
 
         Використовується для підпису challenge від СЕДО.
         """
-        import base64
         data_b64 = base64.b64encode(data).decode()
         opts = options or {"internal": True}  # detached = False
         # Method table of EUSignRPC.dll 1.3.1.109 (docs/inventory/exports/
@@ -522,28 +606,15 @@ class IITClient:
             log.info("Agent has no 'Sign' method (%s), retrying as 'SignData'", e.message)
             method = "SignData"
             result = self.call(method, [data_b64, opts])
-        if isinstance(result, str):
-            try:
-                return base64.b64decode(result)
-            except Exception as e:
-                raise IITRPCError(-1, f"{method} returned invalid base64: {e}") from e
-        if result is None:
-            raise IITRPCError(-1, f"{method} returned empty result")
-        return result
+        # CMS SignedData is DER and must start with a SEQUENCE tag (0x30).
+        return _decode_signature(method, result, expect_der=True)
 
     def sign_hash(self, hash_value: bytes) -> bytes:
         """Raw підпис хешу. (CLI/API: challenge-response де вже є хеш)"""
-        import base64
         h_b64 = base64.b64encode(hash_value).decode()
         result = self.call("SignHash", [h_b64])
-        if isinstance(result, str):
-            try:
-                return base64.b64decode(result)
-            except Exception as e:
-                raise IITRPCError(-1, f"SignHash returned invalid base64: {e}") from e
-        if result is None:
-            raise IITRPCError(-1, "SignHash returned empty result")
-        return result
+        # A raw DSTU 4145 signature is not DER — no 0x30 requirement here.
+        return _decode_signature("SignHash", result, expect_der=False)
 
     # ─── Контекстний менеджер ────────────────────────────────
 

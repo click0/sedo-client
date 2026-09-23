@@ -178,6 +178,7 @@ class SEDOClient:
         log.info("Got certificate: %d bytes", len(cert))
 
         # Пробуємо три flow
+        errors = []
         for flow_name, flow_fn in [
             ("oidc", self._flow_oidc),
             ("direct_kep", self._flow_direct_kep),
@@ -188,14 +189,22 @@ class SEDOClient:
                 if flow_fn(cert, pin):
                     log.info("✓ Authorized via %s", flow_name)
                     return
-            except (requests.RequestException, ValueError, RuntimeError,
-                    NotImplementedError) as e:
-                log.debug("%s flow failed: %s", flow_name, e)
+            except NotImplementedError as e:
+                log.debug("%s flow not implemented: %s", flow_name, e)
+            except (requests.RequestException, ValueError, RuntimeError) as e:
+                # RuntimeError is what every backend raises for a real token
+                # failure (CKR_*, "sign failed: …", no mechanism). At DEBUG it
+                # was invisible without -v, and the operator only saw "run
+                # Fiddler" — pointing at the wrong root cause entirely.
+                log.warning("%s flow failed: %s", flow_name, e)
+                errors.append(f"{flow_name}: {e}")
 
+        detail = f" Errors: {'; '.join(errors)}." if errors else ""
         raise RuntimeError(
-            "All auth flows failed. "
-            "Run Fiddler capture on live login to identify real SEDO flow, "
-            "then update _flow_* methods."
+            "All auth flows failed." + detail +
+            " If no error above is a token/signing error, run a Fiddler "
+            "capture of a live login to identify the real SEDO flow, then "
+            "update the _flow_* methods."
         )
 
     def _flow_oidc(self, cert: bytes, pin: str) -> bool:
@@ -223,6 +232,14 @@ class SEDOClient:
                 if r.status_code != 200:
                     continue
                 data = r.json()
+                # These are GUESSED endpoints: a generic handler answering
+                # 200 [] or 200 "ok" is plausible. .get() on that raised
+                # AttributeError, which no except here or in authorize()
+                # caught — the remaining candidates were never tried.
+                if not isinstance(data, dict):
+                    log.debug("%s: 200 with non-object JSON (%s), next candidate",
+                              url, type(data).__name__)
+                    continue
                 challenge = data.get("challenge") or data.get("nonce") or data.get("data")
                 if not challenge or not isinstance(challenge, (str, bytes)):
                     continue
@@ -273,7 +290,14 @@ class SEDOClient:
         r = self.session.get(f"{self.sedo_url}/api/documents/inbox",
                              params=params, timeout=30)
         r.raise_for_status()
-        return r.json().get("documents", [])
+        data = r.json()
+        if not isinstance(data, dict):
+            raise ValueError(f"Unexpected inbox response: {type(data).__name__}, "
+                             "expected an object with 'documents'")
+        docs = data.get("documents", [])
+        if not isinstance(docs, list):
+            raise ValueError(f"Unexpected 'documents' type: {type(docs).__name__}")
+        return docs
 
     def download_document(self, doc_id: str, output_dir: Path) -> Path:
         doc_id = _safe_doc_id(doc_id)

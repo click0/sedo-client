@@ -27,14 +27,31 @@ def fake_pykcs11(monkeypatch):
     mod.CKF_SERIAL_SESSION = 0x4
     mod.CKA_CLASS = 0x0
     mod.CKA_VALUE = 0x11
+    mod.CKA_ID = 0x102
     mod.CKO_CERTIFICATE = 0x1
     mod.CKO_PRIVATE_KEY = 0x3
 
     # Token surface configurable per test: {mechanism_id: flags}.
     mod.MECHS = {}
-    mod.PRIVATE_KEYS = [object()]
+    # Per-slot override of MECHS: {slot: {mechanism_id: flags}}.
+    mod.MECHS_BY_SLOT = {}
+    mod.SLOTS = [0]
     mod.CERT_DER = b"\x30\x82\x01\x00" + b"\x00" * 16
     mod.SIGNATURE = b"\x00" * 64
+
+    # Objects on the token. Defaults: one private key and one certificate,
+    # linked by the same CKA_ID — a freshly issued Almaz-1K. Tests that need a
+    # multi-pair token replace these lists and fill OBJ_ATTRS.
+    mod.PRIVATE_KEYS = [object()]
+    mod.CERTS = [object()]
+    # {obj: {attribute: value}}; missing entries fall back to CKA_ID b"\x01"
+    # and CKA_VALUE CERT_DER.
+    mod.OBJ_ATTRS = {}
+
+    # Session bookkeeping so tests can prove handles are closed.
+    mod.SESSIONS = []          # every session ever opened, in order
+    mod.LOGIN_ERROR = None     # exception instance raised by Session.login
+    mod.SIGN_CALLS = []        # (key, mechanism id) per Session.sign
 
     class Mechanism:
         def __init__(self, mech_type, param=None):
@@ -60,11 +77,14 @@ def fake_pykcs11(monkeypatch):
         firmwareVersion = (1, 0)
 
     class _Session:
-        def __init__(self):
+        def __init__(self, slot):
+            self.slot = slot
             self.logged_in = False
             self.closed = False
 
         def login(self, pin):
+            if mod.LOGIN_ERROR is not None:
+                raise mod.LOGIN_ERROR
             self.logged_in = True
 
         def logout(self):
@@ -78,13 +98,25 @@ def fake_pykcs11(monkeypatch):
             if cls == mod.CKO_PRIVATE_KEY:
                 return list(mod.PRIVATE_KEYS)
             if cls == mod.CKO_CERTIFICATE:
-                return [object()]
+                return list(mod.CERTS)
             return []
 
         def getAttributeValue(self, obj, attrs):
-            return [mod.CERT_DER]
+            own = mod.OBJ_ATTRS.get(obj, {})
+            out = []
+            for attr in attrs:
+                if attr in own:
+                    out.append(own[attr])
+                elif attr == mod.CKA_ID:
+                    out.append(b"\x01")
+                elif attr == mod.CKA_VALUE:
+                    out.append(mod.CERT_DER)
+                else:
+                    out.append(None)
+            return out
 
         def sign(self, key, data, mech):
+            mod.SIGN_CALLS.append((key, mech.mechType))
             return mod.SIGNATURE
 
     class PyKCS11Lib:
@@ -98,19 +130,21 @@ def fake_pykcs11(monkeypatch):
             return _LibInfo()
 
         def getSlotList(self, tokenPresent=False):
-            return [0]
+            return list(mod.SLOTS)
 
         def getTokenInfo(self, slot):
             return _TokenInfo()
 
         def getMechanismList(self, slot):
-            return list(mod.MECHS.keys())
+            return list(mod.MECHS_BY_SLOT.get(slot, mod.MECHS).keys())
 
         def getMechanismInfo(self, slot, mech_id):
-            return _Info(mod.MECHS.get(mech_id, 0))
+            return _Info(mod.MECHS_BY_SLOT.get(slot, mod.MECHS).get(mech_id, 0))
 
         def openSession(self, slot, flags):
-            return _Session()
+            session = _Session(slot)
+            mod.SESSIONS.append(session)
+            return session
 
     mod.Mechanism = Mechanism
     mod.PyKCS11Lib = PyKCS11Lib
