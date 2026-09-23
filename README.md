@@ -24,7 +24,8 @@ A nightly cron job driven from a Linux host that:
    qualified electronic signature (KEP)
 2. Downloads new documents from the inbox
 3. Verifies signatures with [`ua-sign-verify`](https://github.com/click0)
-4. Sends a Telegram report
+4. Reports the result (Ansible summary; a Telegram report is planned —
+   `vault.yml.example` already has the keys, nothing sends it yet)
 
 Everything runs unattended — no operator prompts.
 
@@ -36,7 +37,7 @@ Everything runs unattended — no operator prompts.
   Автор (Avest) CC-337 / SecureToken-338 — tested with real tokens
 - Four backends: `opensc`, `pkcs11`, `virtual`, `iit_agent`
 - Ansible automation: Windows (WinRM) and Linux (Wine) playbooks
-- CI/CD: spellcheck, test suite (90 tests), release with binaries
+- CI/CD: spellcheck, pytest on Python 3.11–3.13, release with binaries
 
 **What requires a Fiddler capture on a live SEDO session:**
 
@@ -61,7 +62,9 @@ Windows worker
     │       │
     │       └─ opensc_signer.py  ──▶  pkcs11-tool.exe  (OpenSC 32-bit)
     │              or
-    │           pkcs11_signer.py ──▶  PyKCS11
+    │           pkcs11_signer.py ──▶  PyKCS11  (HW token)
+    │              or
+    │           virtual_signer.py ──▶ PyKCS11  (Key-6.dat, no USB)
     │              or
     │           iit_client.py    ──▶  JSON-RPC to EUSignAgent
     │                                    │
@@ -79,7 +82,7 @@ Selectable backends:
 | Backend | Pros | Dependency |
 |---|---|---|
 | **`opensc`** | Simplest, ships with OpenSC | 32-bit OpenSC only |
-| `pkcs11`    | Faster, Python-native        | OpenSC + PyKCS11 |
+| `pkcs11`    | Faster, Python-native        | PyKCS11 (no OpenSC) |
 | `virtual`   | No USB token (software key)  | PyKCS11 + Key-6.dat |
 | `iit_agent` | No OpenSC required           | IIT "Користувач ЦСК" GUI running |
 
@@ -99,8 +102,10 @@ The `pkcs11` backend auto-detects the correct DSTU 4145 mechanism for each
 vendor. Pass `--module` pointing at the right DLL, e.g. for ST-338:
 
 ```
-python sedo_client.py --backend pkcs11 --module "C:\...\Av337CryptokiD.dll" --pin XXXX
+python sedo_client.py --backend pkcs11 --module "C:\...\Av337CryptokiD.dll"
 ```
+
+The PIN is read from `SEDO_PIN` or asked interactively (see *Security*).
 
 ## Quick start
 
@@ -124,10 +129,12 @@ pip install -r requirements.txt
 # 3. Signing test (careful — uses real token)
 .\opensc-test-almaz.ps1 -Pin XXXX -TestSign
 
-# 4. Real run
+# 4. Real run — PIN from the environment, not the command line
+$env:SEDO_PIN = Read-Host "PIN"          # or leave unset and type it at the prompt
 python sedo_client.py --backend opensc `
     --module "C:\Program Files (x86)\Institute of Informational Technologies\EKeys\Almaz1C\PKCS11.EKeyAlmaz1C.dll" `
-    --pin XXXX --fetch
+    --fetch
+Remove-Item Env:SEDO_PIN
 ```
 
 ### Linux controller
@@ -159,17 +166,23 @@ sedo-client/
 ├── opensc-test-almaz.ps1       — PowerShell stack validator for Windows
 ├── pyproject.toml              — packaging (pip install .)
 ├── requirements.txt
-├── tests/                      — 90 unit tests
-│   ├── conftest.py
-│   ├── test_iit_client.py
-│   ├── test_sedo_client.py
-│   ├── test_opensc_signer.py
-│   ├── test_virtual_signer.py
-│   └── test_avest.py
+├── _console.py                 — shared CLI helpers (UTF-8 console, PIN input)
+├── tests/                      — pytest suite (no token, agent or network needed)
+│   ├── conftest.py             — fake PyKCS11 fixture
+│   ├── test_sedo_client.py, test_iit_client.py, test_opensc_signer.py,
+│   │   test_virtual_signer.py, test_avest.py        — per-module tests
+│   ├── test_security.py, test_pin_safety.py         — PIN / secret handling
+│   ├── test_bugs_v029.py, test_coverage_gaps.py,
+│   │   test_p1_*.py, test_p2_*.py                    — audit regressions
+│   ├── test_iit_inventory.py, test_fiddler_analyze.py — scripts/
+│   └── test_versions.py        — Version: headers vs pyproject
 ├── scripts/
 │   ├── fiddler_analyze.py      — parses a Fiddler SAZ capture
 │   ├── smoke_test.py           — quick environment check
-│   └── build_binary.py         — PyInstaller onefile helper
+│   ├── build_binary.py         — PyInstaller onefile helper
+│   ├── iit_unpack.sh           — unpacks an IIT installer without running it
+│   ├── iit_inventory.py        — DLL inventory / diff / registry (stdlib PE parser)
+│   └── check_version.py        — version gate used by CI and release.yml
 ├── ansible/
 │   ├── inventory/
 │   │   ├── hosts.yml
@@ -180,7 +193,7 @@ sedo-client/
 ├── docs/                       — architecture, reverse-engineering report,
 │                                 JSON-RPC protocol, mechanism table, Wine deploy
 ├── .github/workflows/
-│   ├── tests.yml               — pytest on push / PR (3.11, 3.12)
+│   ├── tests.yml               — pytest on push / PR (3.11, 3.12, 3.13)
 │   ├── spellcheck.yml          — cspell on push / PR
 │   ├── release.yml             — v* tag: tests → builds → one GitHub Release
 │   ├── build-windows.yml       — reusable: Windows .exe (called by release.yml)
@@ -201,16 +214,21 @@ sedo-client/
 - Validate the PIN by hand before enabling automation
 - Store the PIN only in Ansible Vault
 - Use `no_log: true` on every task that handles the PIN
-- The `opensc` backend passes the PIN on the `pkcs11-tool` command line,
-  where it is visible to other local users via the process list; on
-  multi-user Windows workers prefer `backend=iit_agent`
+- Pass the PIN via the `SEDO_PIN` environment variable (the playbooks do) or
+  the interactive prompt — **not** `--pin`, which is visible in the process
+  list. Every CLI (`sedo_client.py`, `opensc_signer.py`, `pkcs11_signer.py`,
+  `iit_client.py`) reads `SEDO_PIN`; an empty PIN is refused before it can
+  cost a token attempt
+- The `opensc` backend still passes the PIN on the `pkcs11-tool` command line
+  internally, where it is visible to other local users via the process list;
+  on multi-user Windows workers prefer `backend=iit_agent`
 
 ## Tests
 
 ```bash
-pip install pytest requests
+pip install ".[test,analysis]"   # pytest + pefile (inventory cross-check)
 python -m pytest tests/ -v
-# 208 passed
+python scripts/check_version.py  # Version: headers match pyproject
 ```
 
 ## CI
@@ -340,4 +358,4 @@ Our project is the only publicly available tool that covers all of:
 - SEDO Armed Forces (`sedo.mod.gov.ua`) login automation
 - Ansible playbook ↔ Windows worker ↔ Almaz-1K integration
 - Four-backend architecture (opensc / pkcs11 / virtual / iit_agent)
-- The full cycle: login → fetch → verify → Telegram report
+- The full cycle: login → fetch → verify (→ Telegram report, planned)

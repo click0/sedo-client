@@ -118,7 +118,7 @@ c3                ret
 | DLL | Призначення (підтверджено рядками навколо) | В вашому README |
 |---|---|---|
 | **`CSPBase.dll`** | DSTU 4145 state API + `DSTU4145AcquireState`, `DSTU4145SelfTest` навколо рядка | ✅ згаданий |
-| **`CSPExtension.dll`** | GOST 28147 wrap, ECDH, `GOST28147Un/WrapSharedKey`, `ECDHCalculateSharedKey` | ✅ згаданий |
+| **`CSPExtension.dll`** | GOST 28147 wrap, ECDH, `GOST28147Un/WrapSharedKey`, `ECDHCalculateSharedKey` ⚠️ *спростовано в ADDENDUM v5: CSPExtension — статистичні тести RNG* | ✅ згаданий |
 | **`PKIFormats.dll`** | `PKIGetInterface`, `PKIInitialize`, `PKIFinalize` навколо рядка | ❌ **НЕ згаданий** |
 
 Також у рядках фігурує `mscoree.dll` — це лише фоллбек у CRT `__crt_debugger_hook` для `CorExitProcess`; реально не вантажиться якщо процес не .NET. Ігнорувати. `USER32.DLL` — delay-load, для `MessageBoxW` у фатал-хендлерах; у headless-режимі не завантажиться.

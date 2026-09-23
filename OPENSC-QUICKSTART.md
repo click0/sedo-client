@@ -36,10 +36,11 @@ OpenSC тут — **універсальний клієнт**, IIT DLL — **а�
 
 ```powershell
 $DLL = "C:\Program Files (x86)\Institute of Informational Technologies\EKeys\Almaz1C\PKCS11.EKeyAlmaz1C.dll"
-$TOOL = "C:\Program Files\OpenSC Project\OpenSC\tools\pkcs11-tool.exe"
+# 32-bit OpenSC: 64-bit pkcs11-tool не завантажує 32-bit DLL ІІТ (SETUP-WINDOWS.md §2.2)
+$TOOL = "C:\Program Files (x86)\OpenSC Project\OpenSC\tools\pkcs11-tool.exe"
 
 # Reader (це OpenSC вміє — через PC/SC, без драйвера картки)
-& "C:\Program Files\OpenSC Project\OpenSC\tools\opensc-tool.exe" --list-readers
+& "C:\Program Files (x86)\OpenSC Project\OpenSC\tools\opensc-tool.exe" --list-readers
 
 # Info про модуль
 & $TOOL --module $DLL --show-info
@@ -102,18 +103,21 @@ certutil -dump cert.der
 
 ## Використання в sedo-client
 
-Чотири backend на вибір (`--backend auto` = opensc → pkcs11 → virtual → iit_agent):
+Чотири backend на вибір (`--backend auto` = opensc → pkcs11 → virtual → iit_agent).
+PIN — через `SEDO_PIN` або запит, не `--pin` (його видно у списку процесів):
 
 ```powershell
+$env:SEDO_PIN = Read-Host "PIN"
+
 # OpenSC (subprocess до pkcs11-tool) — простий, не потребує PyKCS11
 python sedo_client.py --backend opensc `
     --module "C:\...\EKeys\Almaz1C\PKCS11.EKeyAlmaz1C.dll" `
-    --pin XXXX --fetch
+    --fetch
 
 # PyKCS11 (Python binding) — швидше
 python sedo_client.py --backend pkcs11 `
     --module "C:\...\EKeys\Almaz1C\PKCS11.EKeyAlmaz1C.dll" `
-    --pin XXXX --fetch
+    --fetch
 
 # Virtual token (PyKCS11 + PKCS11.Virtual.EKeyAlmaz1C.dll + Key-6.dat) — без USB
 # --key-file обов'язковий, якщо Key-6.dat не лежить у стандартному місці:
@@ -121,10 +125,12 @@ python sedo_client.py --backend pkcs11 `
 python sedo_client.py --backend virtual `
     --module "C:\...\EKeys\Almaz1C\PKCS11.Virtual.EKeyAlmaz1C.dll" `
     --key-file "C:\...\EKeys\Almaz1C\Key-6.dat" `
-    --pin XXXX --fetch
+    --fetch
 
 # IIT Agent (JSON-RPC) — fallback
-python sedo_client.py --backend iit_agent --pin XXXX --fetch
+python sedo_client.py --backend iit_agent --fetch
+
+Remove-Item Env:SEDO_PIN
 ```
 
 ## Чому все одно варто мати OpenSC
@@ -144,7 +150,7 @@ python sedo_client.py --backend iit_agent --pin XXXX --fetch
 # ═══════════════════════════════════════════════════════════════
 
 $DLL  = "C:\Program Files (x86)\Institute of Informational Technologies\EKeys\Almaz1C\PKCS11.EKeyAlmaz1C.dll"
-$PATH = "C:\Program Files\OpenSC Project\OpenSC\tools"
+$PATH = "C:\Program Files (x86)\OpenSC Project\OpenSC\tools"   # 32-bit OpenSC
 $PIN  = Read-Host "PIN" -AsSecureString |
         ConvertFrom-SecureString -AsPlainText
 

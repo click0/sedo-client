@@ -2,6 +2,8 @@
 
 > **Вхід:** 32-bit `PKCS11.EKeyAlmaz1C.dll`, 32-bit `PKCS11.Virtual.EKeyAlmaz1C.dll`, `KM.dll`, `KM_PKCS11.dll`, `KM_FileSystem.dll`, `KM_EKeyCrystal1.dll`, `KM_CModGryada61.dll`, `LDAPClient.dll`, `EKAlmaz1CConfiguration.exe`, новіші-старіші версії `CSPBase.dll`/`PKIFormats.dll`/`KM.EKeyAlmaz1C.dll`/`KM.EKeyAlmaz1CBTA.dll`.
 > **Призначення:** доповнення до v1–v5. Закриває останні gap-и. **Шлях В1 Linux/Wine deploy тепер повністю розблокований.**
+>
+> **Примітка до імен (додано пізніше):** цей addendum пише `KM_PKCS11.dll`, `KM_FileSystem.dll` тощо. Справжні імена — **з крапкою** (`KM.PKCS11.dll`, `KM.FileSystem.dll`): так їх вантажить `KM.dll` (`LoadLibraryW("KM.<Type>.dll")`), так вони записані в `docs/inventory/snapshot-b-v6.json` і діаграмі нижче. Для деплою див. `MINIMUM-FILES-LIST.md`; історичний текст не переписуємо.
 
 ---
 

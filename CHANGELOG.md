@@ -314,8 +314,92 @@ License:  BSD 3-Clause "New" or "Revised" License
   файли, що змінилися в оновленні 2026; PKCS#11-модулі, CSPExtension, CSPIBase,
   KM.dll, KM.FileSystem не змінились і лишаються зі snapshot S2. Повний набір для
   деплою = S3 + незмінені файли S2; окремий S4 з інсталяторів не потрібен.
+- **Розбіжності документації з кодом (P2 з аудиту v0.30):**
+  - **Імена `KM.*` з крапкою.** `MINIMUM-FILES-LIST`, `LINUX-WINE-DEPLOYMENT`
+    та `IIT-ANALYSIS` писали `KM_FileSystem.dll`; `KM.dll` вантажить
+    `KM.<Type>.dll` буквально, тож перейменований так файл не знаходився. v6
+    отримав примітку замість переписування історії.
+  - **`MINIMUM-FILES-LIST`: розміри з JSON-snapshot-ів**, а не з пам'яті
+    (EUSignCP 1 800 KB, не 1 700; CSPIBase 1 075 KB, не ~600). «9 `.cap`
+    ≈ 2.5 MB» арифметично неможливо: 9 малих файлів — 3.7 КБ, 2.5 МБ дають
+    два кеші, яких немає у пакеті 2026. Тепер це розписано окремо.
+  - **README / README_uk:**
+    - «90 тестів» і «208 passed» → без застиглих чисел;
+    - на діаграмі з'явився `virtual_signer`;
+    - backend `pkcs11` не потребує OpenSC;
+    - дерево `tests/` і `scripts/` актуальне;
+    - CI 3.11–3.13;
+    - в укр. версії виправлено напрям «викликає / викликається з release.yml».
+  - **`SEDO_PIN` у користувацьких гайдах.** README, SETUP-WINDOWS і
+    OPENSC-QUICKSTART учили `--pin XXXX`; тепер `$env:SEDO_PIN` / запит і
+    пояснення, чому не argv.
+  - **Telegram-звіт позначено як запланований.** README, ARCHITECTURE і
+    `vault.yml.example` описували його як частину продукту, а жоден playbook
+    нічого не надсилає.
+  - **OPENSC-QUICKSTART** використовував 64-бітний OpenSC, з яким DLL ІІТ не
+    вантажаться; тепер скрізь 32-бітний шлях (так само SETUP-WINDOWS §1.3).
+  - **Числа, що розійшлися між документами:**
+    - `IIT-ANALYSIS`: `SetUIMode(true)` → `false`, як у коді;
+    - «~500 / 500+ методів» → 354;
+    - «606 експортів EUSignCP» → 619/630;
+    - CSPBase 131 → 133 експорти;
+    - кількість заглушок HW (37 активних / 31 stub) → ~22 за переліком v1;
+    - `REVERSE-METHODOLOGY` двічі показував той самий файл з різними
+      розмірами;
+    - `PROTOCOL-JSON-RPC` «Ініціалізація (7)» → 8.
+  - **ADDENDUM v7:**
+    - роутер `KM.PKCS11` має 20 PKCS#11-модулів, а не 24: решта 4 — це
+      `cspbase`, `cspextension`, `pkiformats` і `user32`;
+    - лічильники сімейств експортів перераховано з власного списку
+      експортів;
+    - каталог RPC-методів позначено як уже витягнутий;
+    - прибрано биту ссилку «див. §9».
+  - **Історичні ADDENDUM-и отримали примітки:**
+    - v5 — `SignData` → `Sign`;
+    - v1 — спростоване призначення CSPExtension;
+    - v2 — `VIRTUAL-TOKEN.md` не створювався.
+  - **Коди помилок RPC.** Рядки в EUSignRPC.dll ідуть у порядку специфікації
+    xmlrpc-epi, тож коди звідти (`-32500` Application, `-32400` System,
+    `-32300` Transport). `iit_client.RPC_ERRORS` мав вигадані коди `1`/`2`.
+  - `opensc-test-almaz.ps1`: нумерація секцій без пропуску (4 → 5).
+  - SETUP-WINDOWS: очікуваний вивід `.cap` відповідає скрипту; Python 3.13
+    більше не заборонено (лише застереження про колесо PyKCS11).
 
 ### CI
+
+- **Гейт версії** (`scripts/check_version.py`). На кожен push перевіряється,
+  що всі заголовки `Version:` дорівнюють `pyproject`. На тег у `release.yml`
+  додатково перевіряється, що тег = `pyproject` і що в CHANGELOG є датована
+  (не «unreleased») секція. Без нього тег `v0.31` при `version = "0.30"` дав
+  би ассети 0.31 і wheel 0.30. Покрито `tests/test_versions.py`.
+- **Права токена.** `tests.yml` і `spellcheck.yml` отримали
+  `permissions: contents: read`. У `release.yml` `contents: write` лише в
+  job-і `publish`, а не у всьому воркфлоу, зокрема не в `test`, який ставить
+  пакети з PyPI.
+- `concurrency` з `cancel-in-progress` для тестів і spellcheck: новий push у PR
+  скасовує застарілу матрицю.
+- **Extras реально встановлюються.** CI ставить `.[test,analysis]` замість
+  пакетів за іменем, тож опечатка в extra ламає збірку. Звірка
+  stdlib-парсера з `pefile` вперше виконується в CI, раніше вона завжди
+  пропускалась.
+- `release.yml` на тегу також збирає wheel, ставить його і запускає
+  `sedo-client --help`. В обох воркфлоу wheel ставиться з
+  `--force-reinstall --no-deps`, бо пакет уже встановлено з дерева
+  (`.[test,analysis]`), і без цього pip мовчки пропускав wheel. Перевірка
+  «wheel встановлюється» тоді нічого не перевіряла.
+- Spellcheck перевіряє й `*.sh`. `opensc-test-almaz.ps1` лишається поза
+  перевіркою, бо він у CP1251.
+- **Dependabot:**
+  - додано екосистему `pip` (requests, PyKCS11, pytest, pefile раніше не
+    оновлювались і не сканувались);
+  - оновлення групуються в один PR на тиждень;
+  - ліміт відкритих PR — 3.
+- `PyKCS11>=1.5.15` у збірках бінарників, як у `pyproject`.
+- `pyproject.toml`: `license = "BSD-3-Clause"` (SPDX, PEP 639) замість
+  застарілої таблиці `{text = …}`; `setuptools>=77`. Попередження setuptools
+  про депрекацію зникло.
+- `build-unix.yml`: задокументовано, що перейменування FreeBSD-бінарника
+  залежить від copy-back з VM.
 
 - Усі GitHub Actions підняті до актуальних мажорних версій одним PR
   (замість п'яти конфліктних PR від Dependabot): `actions/checkout` 4.4.0 →

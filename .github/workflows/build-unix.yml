@@ -28,7 +28,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install requests pyinstaller pytest
-          pip install PyKCS11
+          pip install "PyKCS11>=1.5.15"
 
       - name: Run tests
         run: python -m pytest tests/ -q
@@ -65,6 +65,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # The build runs inside the VM, but "Rename binary" and "Upload artifact"
+      # below run on the Ubuntu host: they rely on vmactions copying the work
+      # tree (dist/sedo-client included) back after `run` — its default
+      # (copyback: true). If that is ever disabled, the rename step fails.
       - name: Build in FreeBSD VM
         uses: vmactions/freebsd-vm@8b0f1a8fc0ea0def307835c258940ca358fe6480 # v1.5.6
         with:
@@ -78,7 +82,7 @@ jobs:
             python3.11 -m ensurepip --upgrade
             python3.11 -m pip install --upgrade pip
             python3.11 -m pip install requests pyinstaller pytest
-            python3.11 -m pip install PyKCS11 || echo "PyKCS11 unavailable on FreeBSD — building opensc/iit_agent only"
+            python3.11 -m pip install "PyKCS11>=1.5.15" || echo "PyKCS11 unavailable on FreeBSD — building opensc/iit_agent only"
             python3.11 -m pytest tests/ -q
             python3.11 scripts/build_binary.py
             ./dist/sedo-client --help

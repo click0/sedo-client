@@ -123,7 +123,9 @@ e9011e94279d19c8f89ecbee287dfe28bee7ab760d52287078f96c4b702dcf66  PKIFormats.dll
 ## 5. PKCS#11-шар: `KM.PKCS11.dll` 1.0.1.39
 
 Власних PKCS#11-модулів (`C_GetFunctionList`) у пакеті немає. Роутер оновився
-(1.0.1.37 → 1.0.1.39, −1 104 B) і в `.rdata` явно зашитий на **24 модулі**:
+(1.0.1.37 → 1.0.1.39, −1 104 B) і в `.rdata` явно зашитий на **20 PKCS#11-модулів**
+(6 ІІТ + 14 сторонніх). `dynamic_deps` у JSON налічує 24 — це ще `cspbase`,
+`cspextension`, `pkiformats` і `user32`, які PKCS#11-модулями не є:
 
 | Група | Модулі (рядки LoadLibrary) |
 |---|---|
@@ -155,8 +157,9 @@ RTTI-класи ті самі, що у v6 §2.2 (`EKeyAlmaz1CHardware`, `Virtual
   (`docs/inventory/exports/EUSignCP.dll@1.3.1.222.txt`), наступний diff буде точним.
 - Помітні сімейства (частини немає у `PROTOCOL-JSON-RPC.md`): `EUCOSE*` (COSE-підпис),
   `EUBASE45*`, `EUSServerClient*` (серверний підпис хешів, async), `EUSCClient*`
-  (secure-connection шлюзи), `EUDevCtx*IDCard*` (ID-картка/е-паспорт, 42 функції),
-  `EUASiC*` (15), `EUXAdES*` (9), `EUPDF*` (6), `EUCtx*` (123).
+  (secure-connection шлюзи), `EUDevCtx*IDCard*` (ID-картка/е-паспорт, 27 функцій),
+  `EUASiC*` (17), `EUXAdES*` (11), `EUPDF*` (8), `EUCtx*` (131) — пораховано за
+  `exports/EUSignCP.dll@1.3.1.222.txt`.
 - **LoadLibrary-залежності EUSignCP** (з рядків, після придушення артефакту
   «зайвий перший символ»): `cspbase`, `cspextension`, `cspibase`, `pkiformats`, `km.dll`,
   `ldapclient`, `caconnectors`, `cagui`, `pdfsecurity`, `xmlsecurity`, `qrcode`, `rf`,
@@ -166,9 +169,10 @@ RTTI-класи ті самі, що у v6 §2.2 (`EKeyAlmaz1CHardware`, `Virtual
 - **OID**: 43 OID `1.2.804.2.1.1.1.*` в EUSignCP (усі 10 кривих ДСТУ 4145 `…3.1.1.2.0–9`),
   48 у PKIFormats, 15 у KM.*.
 - **`EUSignRPC.dll`**: один експорт `EUSignRPCGetInterface`, 466 → 487 KB. У рядках
-  кілька сотень імен методів (`ASiCSign`, `CtxEnvelopWithDynamicKey`,
-  `ClientDynamicKeySessionCreate`, …), більшості нема в `PROTOCOL-JSON-RPC.md`.
-  Акуратне витягування каталогу методів — окреме завдання (див. §9).
+  354 імені методів (`ASiCSign`, `CtxEnvelopWithDynamicKey`,
+  `ClientDynamicKeySessionCreate`, …). Каталог уже витягнуто:
+  `exports/EUSignRPC.dll@1.3.1.109-methods.txt` і розділ «Каталог методів» у
+  `PROTOCOL-JSON-RPC.md` (саме звідти виправлення `Sign` замість `SignData`).
 - **`NCHostCP.dll`** експортує `NCHostGetInterfaceJSONServer` / `…CAGateway` — це
   host JSON-сервера, за яким, імовірно, стоїть агент на 8081/8083; раніше вважався
   «CA Gateway, не потрібен».
@@ -195,8 +199,8 @@ RTTI-класи ті самі, що у v6 §2.2 (`EKeyAlmaz1CHardware`, `Virtual
 - `docs/MINIMUM-FILES-LIST.md`: перелік `.cap` — нові імена кешів `CacheP2`/`CacheN2`,
   додано `DSTU7624SBox.cap`, `DSTU8845SBox.cap`; у таблицю version drift додано колонку
   S3. **Оновлено цим addendum-ом.**
-- `docs/PROTOCOL-JSON-RPC.md`: каталог методів застарів відносно EUSignRPC 1.3.1.109 —
-  потрібне повторне витягування (не в цьому PR).
+- `docs/PROTOCOL-JSON-RPC.md`: каталог методів оновлено за EUSignRPC 1.3.1.109
+  (354 записи) окремим PR після цього addendum-а.
 - `mechanism_ids.py`, `virtual_signer.py`, `pkcs11_signer.py`: **змін не потребують**
   (роутер підтверджує `0x80420031`, вендорна мапа `detect_token_vendor` покриває всі
   Avest/EFIT-модулі з роутера; нових IIT-mechanism ID не з'явилось).

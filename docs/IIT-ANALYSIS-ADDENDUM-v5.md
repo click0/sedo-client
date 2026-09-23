@@ -245,6 +245,9 @@ EUSignCP.dll
 - `EUCtxReadPrivateKeyFile` / `EUCtxEnumNamedPrivateKeys` — читання приватного ключа (для Virtual)
 - `EUCtxEnumOwnCertificates` / `EUCtxGetOwnCertificate` — виявити certs на токені
 - `EUCtxSignHash` / `EUCtxSignData` — підпис (JSON-RPC метод `SignData` agent-а викликає саме це)
+  > **Виправлено пізніше:** у таблиці методів EUSignRPC 1.3.1.109 методу `SignData`
+  > немає — диспетчер відкидає суфікс `Data`, тож це `Sign` (див. `PROTOCOL-JSON-RPC.md`,
+  > «Каталог методів»; `iit_client.sign_data` викликає `Sign`, `SignData` — лише fallback).
 
 ### 6.3. Реєстрові ключі
 

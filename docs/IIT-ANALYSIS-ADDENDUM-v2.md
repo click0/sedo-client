@@ -336,7 +336,8 @@ D:\Hardware\KeyMedias\EKeyAlmaz1C\Virtual\x64\Release\...     ← Virtual
 - У таблицю backends додати рядок Virtual
 - У секцію Security додати згадку про QSCD-обмеження для КЕП на державному рівні
 
-**Новий файл `docs/VIRTUAL-TOKEN.md`:**
+**Новий файл `docs/VIRTUAL-TOKEN.md`:** *(не створювався — цей зміст увійшов у
+`docs/LINUX-WINE-DEPLOYMENT.md` і `docs/MINIMUM-FILES-LIST.md`, сценарій B)*
 - Інструкція для налаштування Virtual-режиму
 - Де взяти Key-6.dat (у користувача у "Користувач ЦСК-1")
 - Як експортувати PFX з IIT-GUI і використати у sedo-client

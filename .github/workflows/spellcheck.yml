@@ -6,6 +6,13 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: spellcheck-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   cspell:
     runs-on: ubuntu-latest
@@ -21,5 +28,6 @@ jobs:
             **/*.py
             **/*.yml
             **/*.yaml
+            **/*.sh
           incremental_files_only: false
           strict: true

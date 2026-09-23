@@ -41,7 +41,7 @@ Get-PnpDevice -PresentOnly -Status OK |
 # Очікуємо: FriendlyName = "IIT E.Key Almaz-1C"
 
 # 1.3 ATR картки (через OpenSC якщо встановлено)
-& "C:\Program Files\OpenSC Project\OpenSC\tools\opensc-tool.exe" --atr
+& "C:\Program Files (x86)\OpenSC Project\OpenSC\tools\opensc-tool.exe" --atr
 # Очікуваний ATR: 3B 90 18 01 89
 ```
 
@@ -52,7 +52,9 @@ Get-PnpDevice -PresentOnly -Status OK |
 ## Крок 2: Python + OpenSC + залежності (15 хв)
 
 ```powershell
-# 2.1 Python 3.11 або 3.12 (не 3.13 — PyKCS11 ще не підтримує)
+# 2.1 Python 3.11–3.13 (CI тестує всі три). Для backend-ів pkcs11/virtual
+#     потрібне готове колесо PyKCS11 під вашу версію: якщо `pip install
+#     PyKCS11` починає компілювати — поставте 3.12. opensc/iit_agent — без PyKCS11.
 winget install Python.Python.3.12
 python --version  # 3.12.x
 
@@ -127,7 +129,8 @@ cd C:\sedo-client
 # [OK]  Знайдено: ...\EKeys\Almaz1C\PKCS11.EKeyAlmaz1C.dll
 #       Бітність DLL: 32-bit
 # [OK]   CSPBase.dll поруч
-# [OK]   .cap файлів знайдено у 4 директоріях
+# [OK]  .cap файли знайдено у директоріях:
+#         <шлях>   (<N> файлів)   — по рядку на кожну знайдену директорію
 # [OK]  pkcs11-tool.exe (32-bit): ...Program Files (x86)...
 # Readers: IIT E.Key Almaz-1C 0
 # ATR: 3B:90:18:01:89
@@ -231,15 +234,14 @@ python sedo_client.py `
     --url https://sedo.mod.gov.ua `
     --backend opensc `
     --module "C:\Program Files (x86)\Institute of Informational Technologies\EKeys\Almaz1C\PKCS11.EKeyAlmaz1C.dll" `
-    --pin XXXX `
     -v
+# PIN: $env:SEDO_PIN або запит. НЕ --pin — його видно у списку процесів.
 
 # 7.2 Повний цикл з завантаженням документів
 python sedo_client.py `
     --url https://sedo.mod.gov.ua `
     --backend opensc `
     --module "...\PKCS11.EKeyAlmaz1C.dll" `
-    --pin XXXX `
     --fetch `
     --output C:\sedo-client\downloads
 ```
