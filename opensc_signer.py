@@ -10,6 +10,7 @@ Year:     2025-2026
 """
 
 import logging
+import re
 import shutil
 import subprocess
 import tempfile
@@ -18,7 +19,26 @@ from typing import Optional
 
 log = logging.getLogger(__name__)
 
-__all__ = ["OpenSCSigner", "OpenSCNotFound"]
+__all__ = ["OpenSCSigner", "OpenSCNotFound", "parse_sign_mechanisms"]
+
+# One line of `pkcs11-tool --list-mechanisms`. OpenSC prints mechanisms it has
+# no name for as "mechanism-0x<hex>" — which covers every DSTU 4145 id, IIT
+# vendor-defined and the standard 0x352 alike — followed by comma-separated
+# attributes, one of which is "sign" when CKF_SIGN is set.
+_MECH_LINE_RE = re.compile(r"^\s*mechanism-0x([0-9A-Fa-f]+)\b(.*)$")
+
+
+def parse_sign_mechanisms(lines) -> list[int]:
+    """IDs of the unnamed (vendor / DSTU) mechanisms that carry CKF_SIGN."""
+    out = []
+    for line in lines:
+        m = _MECH_LINE_RE.match(line)
+        if not m:
+            continue
+        flags = {f.strip() for f in m.group(2).split(",")}
+        if "sign" in flags:
+            out.append(int(m.group(1), 16))
+    return out
 
 
 class OpenSCNotFound(Exception):
@@ -30,7 +50,8 @@ class OpenSCSigner:
     Signer через OpenSC pkcs11-tool.exe (subprocess).
 
     Стандартні шляхи для пошуку:
-    - C:\\Program Files\\OpenSC Project\\OpenSC\\tools\\pkcs11-tool.exe
+    - C:\\Program Files (x86)\\OpenSC Project\\OpenSC\\tools\\pkcs11-tool.exe
+      (32-bit — єдиний, що може завантажити 32-bit DLL ІІТ)
     - /usr/bin/pkcs11-tool (Linux)
 
     Приклад:
@@ -43,9 +64,16 @@ class OpenSCSigner:
         signature = signer.sign(b"data to sign")
     """
 
+    # pkcs11-tool --sign = C_Sign: a raw DSTU 4145 value, no CMS wrapper.
+    signature_format = "raw"
+
+    # 32-bit first. The IIT/Avest modules are 32-bit PE DLLs; a 64-bit
+    # pkcs11-tool fails on them with "sc_dlopen failed" (SETUP-WINDOWS.md).
+    # SETUP-WINDOWS allows both OpenSC builds side by side, and with the
+    # 64-bit path first auto-detection picked the one that cannot work.
     DEFAULT_PKCS11_TOOL_PATHS = [
-        r"C:\Program Files\OpenSC Project\OpenSC\tools\pkcs11-tool.exe",
         r"C:\Program Files (x86)\OpenSC Project\OpenSC\tools\pkcs11-tool.exe",
+        r"C:\Program Files\OpenSC Project\OpenSC\tools\pkcs11-tool.exe",
         "/usr/bin/pkcs11-tool",
         "/usr/local/bin/pkcs11-tool",
     ]
@@ -125,6 +153,24 @@ class OpenSCSigner:
         """Перелік підтримуваних механізмів."""
         r = self._run(["--list-mechanisms"])
         return r.stdout.decode("utf-8", errors="replace").splitlines()
+
+    def sign_mechanism_ids(self) -> list[int]:
+        """
+        Числові ID механізмів з CKF_SIGN (без PIN — жодної спроби не витрачає).
+
+        Лише "mechanism-0x…" рядки: механізми, які OpenSC знає за іменем
+        (RSA, ECDSA…), не є ДСТУ 4145 і тут не потрібні.
+        """
+        r = self._run(["--list-mechanisms"])
+        if r.returncode != 0:
+            stderr = r.stderr.decode("utf-8", errors="replace").strip()
+            raise RuntimeError(f"list-mechanisms failed: {stderr}")
+        return parse_sign_mechanisms(
+            r.stdout.decode("utf-8", errors="replace").splitlines())
+
+    def set_mechanism(self, mechanism: str) -> None:
+        """Змінити механізм підпису (формат як у --mechanism: "0x80420031")."""
+        self._mechanism = mechanism
 
     def show_info(self) -> str:
         """Module and token info. (CLI: opensc_signer.py --list-slots)"""
@@ -223,6 +269,10 @@ class OpenSCSigner:
         """Очистити PIN з пам'яті."""
         self._pin = None
 
+    def close(self) -> None:
+        """Нічого не тримає між викликами pkcs11-tool — лише logout()."""
+        self.logout()
+
     def __enter__(self):
         return self
 
@@ -235,7 +285,7 @@ class OpenSCSigner:
 
 def main():
     import argparse
-    from _console import force_utf8_io
+    from _console import force_utf8_io, read_pin
     force_utf8_io()
     parser = argparse.ArgumentParser(description="OpenSC pkcs11-tool wrapper")
     parser.add_argument("--module", required=True, help="PKCS11_EKeyAlmaz1C.dll")
@@ -243,7 +293,7 @@ def main():
     parser.add_argument("--pkcs11-tool", help="Path to pkcs11-tool.exe")
     parser.add_argument("--list-slots", action="store_true")
     parser.add_argument("--list-mechanisms", action="store_true")
-    parser.add_argument("--pin", help="Token PIN")
+    parser.add_argument("--pin", help="Token PIN (or $SEDO_PIN, or the prompt)")
     parser.add_argument("--list-objects", action="store_true")
     parser.add_argument("--get-cert", action="store_true")
     parser.add_argument("--sign", help="File to sign")
@@ -271,11 +321,10 @@ def main():
     # B6: previously --list-objects/--get-cert/--sign silently did nothing
     # without --pin. Prompt interactively (same as pkcs11_signer.main).
     needs_pin = bool(args.list_objects or args.get_cert or args.sign)
-    if needs_pin and not args.pin:
-        import getpass
-        args.pin = getpass.getpass("Token PIN: ")
-
-    if args.pin:
+    if needs_pin:
+        # --pin → $SEDO_PIN → prompt; an empty answer exits with an error
+        # instead of silently skipping --sign/--get-cert with exit code 0.
+        args.pin = read_pin(args.pin)
         signer.login(args.pin)
 
         if args.list_objects:

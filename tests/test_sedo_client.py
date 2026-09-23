@@ -253,14 +253,14 @@ class TestFlowOIDC:
         client, _ = _make_client()
         client.session.get.return_value = MagicMock(
             headers={"Location": "https://sedo.mod.gov.ua/home"})
-        assert client._flow_oidc(b"cert", "1234") is False
+        assert client._flow_oidc(b"cert") is False
 
     def test_idp_redirect_still_unimplemented(self):
         """id.gov.ua detected but OIDC dance not implemented → False."""
         client, _ = _make_client()
         client.session.get.return_value = MagicMock(
             headers={"Location": "https://id.gov.ua/auth?x=1"})
-        assert client._flow_oidc(b"cert", "1234") is False
+        assert client._flow_oidc(b"cert") is False
 
 
 class TestFlowDirectKEP:
@@ -269,10 +269,10 @@ class TestFlowDirectKEP:
         challenge = base64.b64encode(b"challenge-bytes").decode()
         init = MagicMock(status_code=200)
         init.json.return_value = {"challenge": challenge, "session_id": "s1"}
-        verify = MagicMock(ok=True)
+        verify = MagicMock(ok=True, status_code=200)
         client.session.post.side_effect = [init, verify]
 
-        assert client._flow_direct_kep(b"cert", "1234") is True
+        assert client._flow_direct_kep(b"cert") is True
         # signer.sign must have been called with the decoded challenge
         assert client.session.post.call_count == 2
         # verify URL ends with /verify
@@ -282,14 +282,14 @@ class TestFlowDirectKEP:
     def test_all_candidates_non_200_returns_false(self):
         client, _ = _make_client()
         client.session.post.return_value = MagicMock(status_code=404)
-        assert client._flow_direct_kep(b"cert", "1234") is False
+        assert client._flow_direct_kep(b"cert") is False
 
     def test_non_string_challenge_skipped(self):
         client, _ = _make_client()
         resp = MagicMock(status_code=200)
         resp.json.return_value = {"challenge": {"nested": "dict"}}
         client.session.post.return_value = resp
-        assert client._flow_direct_kep(b"cert", "1234") is False
+        assert client._flow_direct_kep(b"cert") is False
 
     def test_bytes_challenge_passthrough(self):
         """A bytes challenge is signed as-is (not base64-decoded)."""
@@ -297,10 +297,10 @@ class TestFlowDirectKEP:
         signer.sign = MagicMock(return_value=b"\x00" * 64)
         init = MagicMock(status_code=200)
         init.json.return_value = {"challenge": b"raw-bytes", "session_id": "s"}
-        verify = MagicMock(ok=True)
+        verify = MagicMock(ok=True, status_code=200)
         client.session.post.side_effect = [init, verify]
 
-        assert client._flow_direct_kep(b"cert", "1234") is True
+        assert client._flow_direct_kep(b"cert") is True
         signer.sign.assert_called_once_with(b"raw-bytes")
 
 
@@ -308,7 +308,7 @@ class TestFlowCMSPost:
     def test_raises_not_implemented(self):
         client, _ = _make_client()
         with pytest.raises(NotImplementedError):
-            client._flow_cms_post(b"cert", "1234")
+            client._flow_cms_post(b"cert")
 
 
 class TestAuthorize:
@@ -326,7 +326,7 @@ class TestAuthorize:
         challenge = base64.b64encode(b"abc").decode()
         init = MagicMock(status_code=200)
         init.json.return_value = {"challenge": challenge}
-        verify = MagicMock(ok=True)
+        verify = MagicMock(ok=True, status_code=200)
         client.session.post.side_effect = [init, verify]
         assert client.authorize("1234") is None
 

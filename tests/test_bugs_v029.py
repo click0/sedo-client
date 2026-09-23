@@ -106,9 +106,9 @@ class TestDirectKepKeepsProbing:
         challenge = base64.b64encode(b"abc").decode()
         client.session.post.side_effect = [
             _init_response(challenge), MagicMock(ok=False, status_code=401),
-            _init_response(challenge), MagicMock(ok=True),
+            _init_response(challenge), MagicMock(ok=True, status_code=200),
         ]
-        assert client._flow_direct_kep(b"cert", "1234") is True
+        assert client._flow_direct_kep(b"cert") is True
         assert client.session.post.call_count == 4
 
     def test_all_verifies_fail_returns_false(self):
@@ -117,7 +117,7 @@ class TestDirectKepKeepsProbing:
         client.session.post.side_effect = [
             _init_response(challenge), MagicMock(ok=False, status_code=401),
         ] * 3
-        assert client._flow_direct_kep(b"cert", "1234") is False
+        assert client._flow_direct_kep(b"cert") is False
         assert client.session.post.call_count == 6
 
 
@@ -271,15 +271,15 @@ class TestChallengeDecoding:
     def test_plaintext_nonce_signed_raw(self):
         client, signer = _make_client()
         nonce = "nonce!not/b64"
-        client.session.post.side_effect = [_init_response(nonce), MagicMock(ok=True)]
-        assert client._flow_direct_kep(b"cert", "1234") is True
+        client.session.post.side_effect = [_init_response(nonce), MagicMock(ok=True, status_code=200)]
+        assert client._flow_direct_kep(b"cert") is True
         assert signer.signed == [nonce.encode()]
 
     def test_valid_base64_is_decoded(self):
         client, signer = _make_client()
         client.session.post.side_effect = [
-            _init_response(base64.b64encode(b"hello").decode()), MagicMock(ok=True)]
-        assert client._flow_direct_kep(b"cert", "1234") is True
+            _init_response(base64.b64encode(b"hello").decode()), MagicMock(ok=True, status_code=200)]
+        assert client._flow_direct_kep(b"cert") is True
         assert signer.signed == [b"hello"]
 
 

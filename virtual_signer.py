@@ -37,6 +37,9 @@ class VirtualSigner:
     Encrypt/Decrypt/GenerateKey that are stubs on HW.
     """
 
+    # Session.sign = C_Sign: a raw DSTU 4145 value, no CMS wrapper.
+    signature_format = "raw"
+
     DEFAULT_VIRTUAL_PATHS = [
         r"C:\Program Files (x86)\Institute of Informational Technologies\EKeys\Almaz1C\PKCS11.Virtual.EKeyAlmaz1C.dll",
         r"C:\Program Files (x86)\Institute of Informational Technologies\Користувач ЦСК\PKCS11.Virtual.EKeyAlmaz1C.dll",
@@ -97,7 +100,12 @@ class VirtualSigner:
 
         log.info("Loading Virtual PKCS#11 module: %s", module_path)
         self._pkcs11.load(module_path)
-        info = self._pkcs11.getInfo()
+        try:
+            info = self._pkcs11.getInfo()
+        except Exception:
+            from pkcs11_signer import unload_module
+            unload_module(self._pkcs11)
+            raise
         log.info("Library: %s v%d.%d",
                  info.libraryDescription.strip(),
                  info.libraryVersion[0], info.libraryVersion[1])
@@ -205,9 +213,15 @@ class VirtualSigner:
             self._priv_key = None
             self._cert_obj = None
 
+    def close(self) -> None:
+        """logout() + unload the module (releases the shared IIT mutex)."""
+        from pkcs11_signer import unload_module
+        self.logout()
+        unload_module(self._pkcs11)
+
     def __enter__(self):
         return self
 
     def __exit__(self, *args):
-        self.logout()
+        self.close()
         return False
