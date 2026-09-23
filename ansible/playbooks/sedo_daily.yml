@@ -17,14 +17,31 @@
     date_today: "{{ ansible_date_time.date }}"
     output_dir: "{{ client_path }}\\downloads\\{{ date_today }}"
     report_root: /opt/sedo-reports
-    # Інсталер IIT кладе DLL з крапкою (PKCS11.EKeyAlmaz1C.dll, див.
-    # docs/MINIMUM-FILES-LIST.md); старі копії/інструкції — з підкресленням.
-    # Приймаємо обидві назви, перша знайдена — переможець.
+    # Де шукати PKCS#11 модуль, у порядку пріоритету:
+    #   1-2. Куди його кладе інсталер ІІТ «Користувач ЦСК-1» — саме цей шлях
+    #        наводять SETUP-WINDOWS.md §3 і README. Цього каталогу раніше в
+    #        списку не було, тож playbook падав на воркері, зібраному строго
+    #        за гайдом.
+    #   3-4. Ручна копія DLL поруч із клієнтом (layout з MINIMUM-FILES-LIST).
+    # Інсталер кладе DLL з крапкою (PKCS11.EKeyAlmaz1C.dll); старі копії та
+    # інструкції — з підкресленням. Приймаємо обидві, перша знайдена виграє.
+    iit_ekeys_dir: >-
+      C:\Program Files (x86)\Institute of Informational Technologies\EKeys\Almaz1C
     pkcs11_module_candidates:
+      - "{{ iit_ekeys_dir }}\\PKCS11.EKeyAlmaz1C.dll"
+      - "{{ iit_ekeys_dir }}\\PKCS11_EKeyAlmaz1C.dll"
       - "{{ client_path }}\\libs\\PKCS11.EKeyAlmaz1C.dll"
       - "{{ client_path }}\\libs\\PKCS11_EKeyAlmaz1C.dll"
 
   tasks:
+    # Дата воркера, збережена у hostvars для play верифікації. Воркер у UTC+2/+3
+    # перетинає полудень доби на 2-3 години раніше за контролер, тож фільтр за
+    # датою контролера тихо пропускав би документи, покладені у <host>/<дата
+    # воркера>/. Верифікація має брати саме ті дати, які використав fetch.
+    - name: Запам'ятати дату воркера для play верифікації
+      ansible.builtin.set_fact:
+        sedo_fetch_date: "{{ date_today }}"
+
     - name: Перевірка Windows Smart Card service
       ansible.windows.win_service:
         name: SCardSvr
@@ -73,7 +90,7 @@
         cmd: >
           "{{ python_path }}" "{{ client_path }}\sedo_client.py"
           --url "{{ sedo_url }}"
-          --backend pkcs11
+          --backend {{ sedo_backend | default('opensc') }}
           --module "{{ pkcs11_module }}"
           --fetch
           --since "{{ date_today }}"
@@ -86,18 +103,25 @@
       # "changed" лише коли реально щось завантажено, а не на кожен rc==0.
       changed_when: "sedo_result.stdout is search('Документів: [1-9]')"
 
+    # rc теж через default: коли win_command не зміг ЗАПУСТИТИ процес (немає
+    # python_path), у результаті є msg, але немає rc, і ці таски падали з
+    # "dict object has no attribute 'rc'", ховаючи справжню причину — тобто
+    # рівно те, що розділення no_log/діагностики мало виправити.
     - name: Діагностика клієнта при провалі (rc / stdout / stderr, без PIN)
       ansible.builtin.debug:
         msg:
-          rc: "{{ sedo_result.rc }}"
+          rc: "{{ sedo_result.rc | default('(процес не запустився)') }}"
+          msg: "{{ sedo_result.msg | default('') }}"
           stdout: "{{ sedo_result.stdout | default('') }}"
           stderr: "{{ sedo_result.stderr | default('') }}"
-      when: sedo_result.rc != 0
+      when: sedo_result.rc | default(-1) != 0
 
     - name: Зупинити якщо клієнт завершився з помилкою
       ansible.builtin.fail:
-        msg: "sedo-client завершився з rc={{ sedo_result.rc }} — див. діагностику вище"
-      when: sedo_result.rc != 0
+        msg: >-
+          sedo-client завершився з rc={{ sedo_result.rc | default('(не запустився)') }}
+          — див. діагностику вище
+      when: sedo_result.rc | default(-1) != 0
 
     - name: Знайти завантажені файли
       ansible.windows.win_find:
@@ -128,13 +152,26 @@
         recurse: true
       register: zip_files
 
-    # Лише сьогоднішній каталог (<host>/<date>/*.zip) — інакше кожен запуск
+    # Дати, які реально використали воркери (fallback — дата контролера, якщо
+    # play 1 не виконувався через --limit). Без цього фільтр за датою
+    # контролера тихо не верифікував би документи воркера в іншому часовому
+    # поясі.
+    - name: Зібрати дати, використані воркерами
+      ansible.builtin.set_fact:
+        fetch_dates: >-
+          {{ (groups['sedo_workers'] | default([])
+              | map('extract', hostvars)
+              | map(attribute='sedo_fetch_date', default='')
+              | select('string') | reject('equalto', '')
+              | unique | list) or [date_today] }}
+
+    # Лише каталоги цих дат (<host>/<date>/*.zip) — інакше кожен запуск
     # переверифікує всю історію, а results/ під verified/ росте без меж.
-    - name: Відібрати ZIP лише за сьогодні
+    - name: Відібрати ZIP за цими датами
       ansible.builtin.set_fact:
         todays_zips: >-
           {{ zip_files.files | map(attribute='path')
-             | select('search', '/' ~ date_today ~ '/')
+             | select('search', '/(' ~ (fetch_dates | join('|')) ~ ')/')
              | reject('search', '/verified/') | list }}
 
     - name: Запустити ua-sign-verify на кожен

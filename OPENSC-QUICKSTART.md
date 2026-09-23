@@ -116,8 +116,11 @@ python sedo_client.py --backend pkcs11 `
     --pin XXXX --fetch
 
 # Virtual token (PyKCS11 + PKCS11.Virtual.EKeyAlmaz1C.dll + Key-6.dat) — без USB
+# --key-file обов'язковий, якщо Key-6.dat не лежить у стандартному місці:
+# без нього backend=virtual одразу падає з FileNotFoundError.
 python sedo_client.py --backend virtual `
     --module "C:\...\EKeys\Almaz1C\PKCS11.Virtual.EKeyAlmaz1C.dll" `
+    --key-file "C:\...\EKeys\Almaz1C\Key-6.dat" `
     --pin XXXX --fetch
 
 # IIT Agent (JSON-RPC) — fallback
