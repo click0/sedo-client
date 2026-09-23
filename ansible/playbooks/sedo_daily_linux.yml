@@ -12,6 +12,22 @@
 # (sedo_client.py: --pin → SEDO_PIN → getpass), so it never appears on the
 # command line / process list. no_log stays on the run task as defence in
 # depth; rc/stdout/stderr are shown by a separate task on failure.
+#
+# ⚠️  ВАЖЛИВО ПРО ІНТЕРПРЕТАТОР
+#
+# `--backend virtual` НЕ працює з нативним `python3`. PKCS11.Virtual.
+# EKeyAlmaz1C.dll — це 32-bit Windows PE; PyKCS11 під нативним CPython робить
+# dlopen(), який такий файл завантажити не може, а WINEPREFIX на нативний
+# процес не впливає взагалі. Раніше цей playbook проходив усі чотири
+# preflight-перевірки і помирав усередині PyKCS11 з незрозумілою помилкою.
+#
+# Єдина конфігурація, що може працювати: Windows-Python УСЕРЕДИНІ Wine-
+# префіксу запускає клієнта, тобто Python + PyKCS11 + DLL — усі віндовські
+# (див. docs/IIT-ANALYSIS-ADDENDUM-v6.md §6.3). Тому інтерпретатор задається
+# явно через `sedo_client_python` і не має «зручного» дефолту — playbook
+# свідомо падає в preflight, а не глибоко в бібліотеці.
+#
+# Цей шлях ЩЕ НЕ ПЕРЕВІРЯВСЯ на живому Wine-префіксі з реальним Key-6.dat.
 
 - name: SEDO daily check (Linux / Wine / virtual token)
   hosts: sedo_workers_linux
@@ -31,7 +47,39 @@
     virtual_module: "{{ sedo_libs }}/PKCS11.Virtual.EKeyAlmaz1C.dll"
     key_file: "{{ sedo_libs }}/Key-6.dat"
 
+    # Інтерпретатор, який реально запускає клієнта. Мусить бути Windows-Python
+    # усередині Wine-префіксу — див. блок ⚠️ у шапці файлу. Приклад:
+    #   sedo_client_python: 'wine C:\Python312\python.exe'
+    client_python: "{{ sedo_client_python | default('') }}"
+
+    # Windows-форми тих самих шляхів, бо аргументи читає Windows-Python.
+    # drive_c/sedo-libs усередині префіксу — це C:\sedo-libs (той самий шлях,
+    # що прописаний у реєстрі згідно docs/LINUX-WINE-DEPLOYMENT.md §4).
+    # Усе, що лежить поза префіксом, Wine бачить через диск Z:.
+    sedo_libs_win: 'C:\sedo-libs'
+    virtual_module_win: "{{ sedo_libs_win }}\\PKCS11.Virtual.EKeyAlmaz1C.dll"
+    key_file_win: "{{ sedo_libs_win }}\\Key-6.dat"
+    client_script_win: "Z:{{ (client_path ~ '/sedo_client.py') | replace('/', '\\') }}"
+    output_dir_win: "Z:{{ output_dir | replace('/', '\\') }}"
+
   tasks:
+    # Fail here, not inside PyKCS11. A native python3 cannot dlopen a 32-bit
+    # Windows PE DLL, so there is no safe default for this variable.
+    - name: Stop if the Wine Python interpreter is not configured
+      ansible.builtin.fail:
+        msg: >-
+          sedo_client_python is not set. The virtual backend needs a WINDOWS
+          Python running inside the Wine prefix — a native python3 cannot load
+          PKCS11.Virtual.EKeyAlmaz1C.dll (32-bit PE), and WINEPREFIX has no
+          effect on a native process. Set it in the inventory, for example
+          sedo_client_python: 'wine C:\Python312\python.exe'
+          and see docs/LINUX-WINE-DEPLOYMENT.md §6.
+      when: not client_python
+
+    - name: Remember the worker date for the verification play
+      ansible.builtin.set_fact:
+        sedo_fetch_date: "{{ date_today }}"
+
     - name: Verify Wine prefix exists
       ansible.builtin.stat:
         path: "{{ wine_prefix }}/system.reg"
@@ -73,17 +121,18 @@
         state: directory
         mode: '0750'
 
+    # Windows-форми шляхів: аргументи читає Windows-Python усередині префіксу.
     - name: Run sedo-client with virtual backend
       ansible.builtin.command:
         cmd: >-
-          python3 {{ client_path }}/sedo_client.py
+          {{ client_python }} "{{ client_script_win }}"
           --url "{{ sedo_url | default('https://sedo.mod.gov.ua') }}"
           --backend virtual
-          --module "{{ virtual_module }}"
-          --key-file "{{ key_file }}"
+          --module "{{ virtual_module_win }}"
+          --key-file "{{ key_file_win }}"
           --fetch
           --since "{{ date_today }}"
-          --output "{{ output_dir }}"
+          --output "{{ output_dir_win }}"
       environment:
         WINEPREFIX: "{{ wine_prefix }}"
         SEDO_PIN: "{{ virtual_pins[inventory_hostname] }}"
@@ -93,18 +142,25 @@
       # "changed" only when something was actually downloaded, not on any rc==0.
       changed_when: "sedo_result.stdout is search('Документів: [1-9]')"
 
+    # rc through default() as well: when command cannot even START the process
+    # the result carries msg but no rc, and these tasks died with "dict object
+    # has no attribute 'rc'", hiding the real cause — exactly what splitting
+    # no_log from the diagnostics was meant to prevent.
     - name: Show client diagnostics on failure (rc / stdout / stderr, no PIN)
       ansible.builtin.debug:
         msg:
-          rc: "{{ sedo_result.rc }}"
+          rc: "{{ sedo_result.rc | default('(process did not start)') }}"
+          msg: "{{ sedo_result.msg | default('') }}"
           stdout: "{{ sedo_result.stdout | default('') }}"
           stderr: "{{ sedo_result.stderr | default('') }}"
-      when: sedo_result.rc != 0
+      when: sedo_result.rc | default(-1) != 0
 
     - name: Stop if the client failed
       ansible.builtin.fail:
-        msg: "sedo-client exited with rc={{ sedo_result.rc }} — see diagnostics above"
-      when: sedo_result.rc != 0
+        msg: >-
+          sedo-client exited with rc={{ sedo_result.rc | default('(did not start)') }}
+          — see diagnostics above
+      when: sedo_result.rc | default(-1) != 0
 
     - name: Find downloaded documents
       ansible.builtin.find:
@@ -136,13 +192,25 @@
         recurse: true
       register: zip_files
 
-    # Only today's directory (<host>/<date>/*.zip) — otherwise every run
+    # The dates the workers actually used (fallback: the controller's date, if
+    # play 1 was skipped by --limit). Filtering by the controller's date alone
+    # silently skipped documents fetched by a worker in another timezone.
+    - name: Collect the dates the workers used
+      ansible.builtin.set_fact:
+        fetch_dates: >-
+          {{ (groups['sedo_workers_linux'] | default([])
+              | map('extract', hostvars)
+              | map(attribute='sedo_fetch_date', default='')
+              | select('string') | reject('equalto', '')
+              | unique | list) or [date_today] }}
+
+    # Only those dates' directories (<host>/<date>/*.zip) — otherwise every run
     # re-verifies the whole history and verified/ grows without bound.
-    - name: Select today's ZIPs
+    - name: Select ZIPs for those dates
       ansible.builtin.set_fact:
         todays_zips: >-
           {{ zip_files.files | map(attribute='path')
-             | select('search', '/' ~ date_today ~ '/')
+             | select('search', '/(' ~ (fetch_dates | join('|')) ~ ')/')
              | reject('search', '/verified/') | list }}
 
     - name: Run ua-sign-verify on each document

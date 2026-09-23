@@ -93,18 +93,39 @@ Windows Registry Editor Version 5.00
 REGEDIT
 ```
 
-## 5. Test
+## 5. Which Python runs the client — read this first
+
+⚠️ **A native `python3` cannot use this backend.**
+`PKCS11.Virtual.EKeyAlmaz1C.dll` is a 32-bit **Windows PE**. Under native
+CPython, PyKCS11 calls `dlopen()`, which cannot load a PE image, and
+`WINEPREFIX` has no effect on a native process — it only configures Wine.
+Setting it and calling `python3` does nothing for the loader.
+
+The only configuration that can work is **all three parts Windows**: a Windows
+Python inside the Wine prefix, the Windows build of PyKCS11, and the IIT DLL.
+Same conclusion as `IIT-ANALYSIS-ADDENDUM-v6.md` §6.3.
+
+```bash
+# Install Python for Windows into the prefix (once)
+export WINEPREFIX=$HOME/.sedo-wine
+wine python-3.12.x-win32.exe /quiet InstallAllUsers=1 PrependPath=1
+wine C:\\Python312\\python.exe -m pip install PyKCS11 requests
+```
+
+**Status: not yet verified** on a live prefix with a real `Key-6.dat`. The
+steps below are the architecture, not a tested recipe. Until someone runs it,
+prefer `--backend opensc` on a Windows worker.
+
+## 6. Test and run
 
 ```bash
 export WINEPREFIX=$HOME/.sedo-wine
 
-# Verify the virtual module loads
-python3 -c "
-import PyKCS11
-lib = PyKCS11.PyKCS11Lib()
-lib.load('$HOME/.sedo-wine/drive_c/sedo-libs/PKCS11.Virtual.EKeyAlmaz1C.dll')
-print('OK:', lib.getInfo().libraryDescription.strip())
-"
+# Verify the virtual module loads — note: Windows Python, not python3
+wine C:\\Python312\\python.exe -c "import PyKCS11; \
+lib = PyKCS11.PyKCS11Lib(); \
+lib.load(r'C:\\sedo-libs\\PKCS11.Virtual.EKeyAlmaz1C.dll'); \
+print('OK:', lib.getInfo().libraryDescription.strip())"
 ```
 
 Expected:
@@ -112,52 +133,57 @@ Expected:
 OK: E.key_Almaz-1C_Library
 ```
 
-## 6. Run sedo-client
-
 ```bash
-python3 sedo_client.py \
+# Run the client. Paths are Windows-form because a Windows Python reads them;
+# Wine maps the Linux root to Z:, so a repo at /opt/sedo-client is
+# Z:\opt\sedo-client. PIN via SEDO_PIN, never on the command line.
+SEDO_PIN="$PIN" wine C:\\Python312\\python.exe 'Z:\opt\sedo-client\sedo_client.py' \
     --backend virtual \
-    --module "$HOME/.sedo-wine/drive_c/sedo-libs/PKCS11.Virtual.EKeyAlmaz1C.dll" \
-    --key-file "$HOME/.sedo-wine/drive_c/sedo-libs/Key-6.dat" \
-    --pin "$PIN" \
+    --module 'C:\sedo-libs\PKCS11.Virtual.EKeyAlmaz1C.dll' \
+    --key-file 'C:\sedo-libs\Key-6.dat' \
     --fetch \
-    --output ./downloads
+    --output 'Z:\opt\sedo-client\downloads'
 ```
 
 ## 7. Ansible (Linux worker)
 
 No WinRM required. The full playbook is
 `ansible/playbooks/sedo_daily_linux.yml` (inventory group
-`sedo_workers_linux`, PINs in `vault.yml` under `virtual_pins`). The core
-task looks like this — note the PIN goes through the `SEDO_PIN` environment
-variable, never through `--pin` on the command line:
+`sedo_workers_linux`, PINs in `vault.yml` under `virtual_pins`).
+
+The interpreter is **not** defaulted: per §5 a native `python3` cannot load the
+module, so the playbook refuses to run until you name a Windows Python inside
+the prefix. Set it in the inventory:
 
 ```yaml
-- name: SEDO daily check (Linux/Wine virtual token)
-  hosts: sedo_workers_linux
-  gather_facts: true
-  vars_files:
-    - ../inventory/vault.yml
-  vars:
-    date_today: "{{ ansible_date_time.date }}"
-    wine_prefix: "/opt/sedo-wine"
-    sedo_libs: "{{ wine_prefix }}/drive_c/sedo-libs"
-  tasks:
+    sedo_workers_linux:
+      vars:
+        sedo_client_python: 'wine C:\Python312\python.exe'
+```
+
+Without it the first task fails with an explanatory message instead of dying
+inside PyKCS11 several tasks later. The core task then looks like this — note
+the Windows-form paths and the PIN going through `SEDO_PIN`, never `--pin`:
+
+```yaml
     - name: Run sedo-client with virtual backend
       ansible.builtin.command:
-        cmd: >
-          python3 /opt/sedo-client/sedo_client.py
+        cmd: >-
+          {{ client_python }} "{{ client_script_win }}"
           --backend virtual
-          --module "{{ sedo_libs }}/PKCS11.Virtual.EKeyAlmaz1C.dll"
-          --key-file "{{ sedo_libs }}/Key-6.dat"
+          --module "{{ virtual_module_win }}"
+          --key-file "{{ key_file_win }}"
           --fetch
           --since "{{ date_today }}"
-          --output "/opt/sedo-client/downloads/{{ date_today }}"
+          --output "{{ output_dir_win }}"
       environment:
         WINEPREFIX: "{{ wine_prefix }}"
         SEDO_PIN: "{{ virtual_pins[inventory_hostname] }}"
       no_log: true
 ```
+
+The playbook derives the `*_win` variables from the Unix ones: everything under
+the prefix becomes `C:\…`, everything outside it `Z:\…`.
 
 ## Mutex warning
 
