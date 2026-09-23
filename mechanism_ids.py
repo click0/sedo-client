@@ -20,6 +20,7 @@ __all__ = [
     "CKM_IIT_DSTU4145_ALT", "CKM_DSTU4145", "is_supported",
     "detect_dstu4145_mechanism", "DSTU4145_SIGN_MECHANISMS",
     "pick_sign_mechanism", "choose_sign_mechanism", "detect_token_vendor",
+    "NON_SIGNATURE_MECHANISMS",
 ]
 
 # 32 bytes  = 256-bit symmetric key (Kalyna/Kupyna/ГОСТ)
@@ -166,16 +167,29 @@ def pick_sign_mechanism(available_ids) -> "int | None":
     return None
 
 
+# Механізми, що мають CKF_SIGN, але НЕ є підписом ДСТУ 4145.
+#
+# 0x80420014 (SYM_MAC) — симетричний HMAC/CMAC. Підпис ним не є КЕП, СЕДО його
+# відкине, а кожна спроба підписати спалює одну з 15 PIN-спроб Алмаз-1К. Саме
+# цей ID помилково фігурував у OPENSC-QUICKSTART до v0.29. Tier 2/3 у
+# choose_sign_mechanism мусить його обходити, інакше токен без 0x80420031/32
+# отримав би MAC замість підпису.
+NON_SIGNATURE_MECHANISMS = frozenset({
+    0x80420014,
+})
+
+
 def choose_sign_mechanism(signing_ids) -> int:
     """
     Єдина політика вибору sign-механізму для обох PyKCS11 backend-ів
     (pkcs11_signer, virtual_signer). Приймає ID, що вже мають CKF_SIGN.
 
     1. Відомий DSTU 4145 ID (IIT 0x80420031/32 або стандарт 0x00000352).
-    2. Перший vendor-defined (>= 0x80000000) — нові IIT-токени.
-    3. Перший зі списку — останній fallback.
+    2. Перший vendor-defined (>= 0x80000000), крім NON_SIGNATURE_MECHANISMS.
+    3. Перший зі списку, крім NON_SIGNATURE_MECHANISMS — останній fallback.
 
-    Кидає ValueError, якщо список порожній.
+    Кидає ValueError, якщо список порожній або містить лише механізми, які
+    свідомо не дають підпису ДСТУ 4145.
     """
     ids = [int(m) for m in signing_ids]
     if not ids:
@@ -183,7 +197,12 @@ def choose_sign_mechanism(signing_ids) -> int:
     known = pick_sign_mechanism(ids)
     if known is not None:
         return known
-    for mech in ids:
+    candidates = [m for m in ids if m not in NON_SIGNATURE_MECHANISMS]
+    if not candidates:
+        raise ValueError(
+            "only non-signature mechanisms available: "
+            + ", ".join(f"0x{m:08X}" for m in ids))
+    for mech in candidates:
         if mech >= 0x80000000:
             return mech
-    return ids[0]
+    return candidates[0]

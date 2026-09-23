@@ -19,8 +19,8 @@ log = logging.getLogger(__name__)
 
 __all__ = [
     "IITClient", "IITError", "IITRPCError", "IITAgentNotFound",
-    "discover_agent", "read_port_from_registry", "read_trusted_sites",
-    "read_eusigncp_config",
+    "discover_agent", "verify_agent", "read_port_from_registry",
+    "read_trusted_sites", "read_eusigncp_config",
 ]
 
 
@@ -192,6 +192,45 @@ def probe_port(host: str = "127.0.0.1", port: int = 8081,
         return False
 
 
+def verify_agent(host: str = "127.0.0.1", port: int = 8081,
+                 timeout: float = 2.0, use_https: bool = False) -> bool:
+    """
+    Підтвердити, що на порту саме JSON-RPC агент ІІТ, а не сторонній сервіс.
+
+    `probe_port` лише перевіряє, що хтось відповідає на OPTIONS. Цього мало:
+    у FALLBACK_PORTS є 8080/9000/9090, які часто займають інші застосунки, а
+    наступним кроком `IITAgentAdapter.login()` відправляє туди PIN у полі
+    `params` методу ReadPrivateKey. Тому перед вибором порту робимо безпечний
+    (без PIN) виклик GetVersion і вимагаємо валідний JSON-RPC-конверт.
+
+    `error` у відповіді теж підходить: агент, що не знає GetVersion, поверне
+    -32601, і це так само доводить, що це JSON-RPC сервер, а не випадковий HTTP.
+    """
+    scheme = "https" if use_https else "http"
+    url = f"{scheme}://{host}:{port}/json-rpc"
+    skip_verify = use_https and _is_loopback(host)
+    try:
+        if skip_verify:
+            try:
+                import urllib3
+                urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            except ImportError:
+                pass
+        r = requests.post(url, json={"jsonrpc": "2.0", "id": 0,
+                                     "method": "GetVersion", "params": []},
+                          timeout=timeout, verify=not skip_verify)
+        if r.status_code != 200:
+            return False
+        data = r.json()
+    except (requests.exceptions.RequestException, ValueError):
+        return False
+    if not isinstance(data, dict):
+        return False
+    if "jsonrpc" in data and data.get("jsonrpc") != "2.0":
+        return False
+    return "result" in data or "error" in data
+
+
 def discover_agent() -> Optional[tuple[str, int, bool]]:
     """
     Знаходить агента: повертає (host, port, is_https) або None.
@@ -199,17 +238,24 @@ def discover_agent() -> Optional[tuple[str, int, bool]]:
     """
     http_port, https_port = read_port_from_registry()
 
+    def _found(port: int, https: bool) -> bool:
+        # probe_port — дешева перевірка життя; verify_agent — доказ, що це
+        # саме агент. Без другої перевірки discovery міг віддати сторонній
+        # сервіс на 8080/9000/9090, і PIN пішов би туди (див. verify_agent).
+        return (probe_port("127.0.0.1", port, use_https=https)
+                and verify_agent("127.0.0.1", port, use_https=https))
+
     # Спробувати HTTP з реєстру
-    if http_port and probe_port("127.0.0.1", http_port):
+    if http_port and _found(http_port, False):
         return "127.0.0.1", http_port, False
     # HTTPS з реєстру
-    if https_port and probe_port("127.0.0.1", https_port, use_https=True):
+    if https_port and _found(https_port, True):
         return "127.0.0.1", https_port, True
     # Fallback порти — пробуємо і HTTP, і HTTPS (8083/8443 — HTTPS-порти агента)
     for p in FALLBACK_PORTS:
-        if probe_port("127.0.0.1", p):
+        if _found(p, False):
             return "127.0.0.1", p, False
-        if probe_port("127.0.0.1", p, use_https=True):
+        if _found(p, True):
             return "127.0.0.1", p, True
     return None
 
@@ -333,13 +379,19 @@ class IITClient:
         except requests.exceptions.RequestException as e:
             raise IITAgentNotFound(f"Failed to reach agent: {e}") from e
 
+        # The error body is echoed into the exception message, which surfaces at
+        # ERROR level — and for a PIN-carrying method that body starts with the
+        # request JSON we just sent. _REDACTED_METHODS must gate this too, not
+        # only the log.debug above.
+        body = "[***]" if method in _REDACTED_METHODS else r.text[:200]
+
         if r.status_code != 200:
-            raise IITRPCError(r.status_code, f"HTTP {r.status_code}: {r.text[:200]}")
+            raise IITRPCError(r.status_code, f"HTTP {r.status_code}: {body}")
 
         try:
             data = r.json()
         except ValueError as e:
-            raise IITRPCError(-1, f"Agent returned non-JSON: {r.text[:200]}") from e
+            raise IITRPCError(-1, f"Agent returned non-JSON: {body}") from e
 
         if "error" in data and data["error"] is not None:
             err = data["error"]
