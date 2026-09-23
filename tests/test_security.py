@@ -125,11 +125,15 @@ class TestSafeDocId:
 # ─── S5: PIN from SEDO_PIN env, real parser choices ─────────
 
 class TestPinFromEnvironment:
-    def test_env_pin_used_without_prompt(self, monkeypatch):
+    # main() creates --output (default ./downloads) — run in tmp_path so the
+    # suite does not leave a downloads/ directory in the repository root.
+
+    def test_env_pin_used_without_prompt(self, monkeypatch, tmp_path):
+        monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("SEDO_PIN", "env-pin")
         monkeypatch.setattr(sys, "argv", ["sedo-client"])
         fake_ctx = MagicMock()
-        with patch("sedo_client.SEDOClient", return_value=fake_ctx) as cls, \
+        with patch("sedo_client.SEDOClient", return_value=fake_ctx), \
              patch("getpass.getpass") as gp:
             from sedo_client import main
             main()
@@ -137,7 +141,8 @@ class TestPinFromEnvironment:
         sedo = fake_ctx.__enter__.return_value
         sedo.authorize.assert_called_once_with("env-pin")
 
-    def test_argv_pin_takes_precedence_over_env(self, monkeypatch):
+    def test_argv_pin_takes_precedence_over_env(self, monkeypatch, tmp_path):
+        monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("SEDO_PIN", "env-pin")
         monkeypatch.setattr(sys, "argv", ["sedo-client", "--pin", "argv-pin"])
         fake_ctx = MagicMock()

@@ -17,6 +17,15 @@ export LC_ALL=C
 
 OLE_SIG='\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1'
 
+need() { command -v "$1" >/dev/null 2>&1 || { echo "missing tool: $1 (apt-get install $2)" >&2; return 1; }; }
+
+# detect_type itself needs `strings` and a grep with -P. Without them the
+# checks below failed silently (`|| true`, or `if grep -P` → false) and a
+# Delphi-wrapped MSI was misreported as "pe … cannot unpack".
+need strings binutils || exit 2
+printf 'x' | grep -qP 'x' 2>/dev/null \
+    || { echo "missing tool: grep with -P (GNU grep, apt-get install grep)" >&2; exit 2; }
+
 usage() { echo "usage: $0 <installer.exe|.msi> <outdir>" >&2; exit 2; }
 [[ $# -eq 2 ]] || usage
 src=$1; out=$2
@@ -42,7 +51,6 @@ detect_type() {
     echo pe
 }
 
-need() { command -v "$1" >/dev/null 2>&1 || { echo "missing tool: $1 (apt-get install $2)" >&2; return 1; }; }
 
 unpack_msi() {
     if need msiextract msitools 2>/dev/null; then

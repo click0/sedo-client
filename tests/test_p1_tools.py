@@ -17,6 +17,8 @@ UNPACK = ROOT / "scripts" / "iit_unpack.sh"
 
 
 def _load():
+    if "iit_inventory" in sys.modules:  # shared with test_iit_inventory
+        return sys.modules["iit_inventory"]
     spec = importlib.util.spec_from_file_location("iit_inventory", SCRIPT)
     mod = importlib.util.module_from_spec(spec)
     sys.modules["iit_inventory"] = mod

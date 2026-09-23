@@ -149,7 +149,9 @@ class TestConsoleHelper:
 
     @pytest.mark.parametrize("module", [
         "sedo_client.py", "opensc_signer.py", "pkcs11_signer.py",
-        "iit_client.py", "scripts/smoke_test.py",
+        "iit_client.py", "virtual_signer.py", "mechanism_ids.py",
+        "scripts/smoke_test.py", "scripts/iit_inventory.py",
+        "scripts/fiddler_analyze.py", "scripts/build_binary.py",
     ])
     def test_no_inline_reconfigure_loops(self, module):
         """Only _console.py may call stream.reconfigure — no more copies."""
