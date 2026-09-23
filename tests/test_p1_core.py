@@ -172,7 +172,7 @@ class TestAuthRobustness:
             _resp(200, {"challenge": challenge}),   # candidate 2: init
             _resp(200, {}),                         # candidate 2: verify ok
         ]
-        assert c._flow_direct_kep(b"cert", "1234") is True
+        assert c._flow_direct_kep(b"cert") is True
         assert c.session.post.call_count == 3
 
     def test_authorize_survives_non_object_body_everywhere(self):

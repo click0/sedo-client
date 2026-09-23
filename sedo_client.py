@@ -27,17 +27,67 @@ log = logging.getLogger(__name__)
 # restrict to a safe charset so ".." / "/" / drive-letters can't escape output_dir.
 _DOC_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 
+# Windows device names. "downloads\\NUL.zip" is the NUL device, not a file —
+# the extension does not help — so a document with id "NUL" or "CON" was
+# silently discarded (or written to the console) while download_document()
+# reported success. Checked on the part before the first dot, case-insensitive,
+# as Windows does.
+_WINDOWS_RESERVED = frozenset(
+    ["CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"]
+    + [f"COM{i}" for i in range(1, 10)] + [f"LPT{i}" for i in range(1, 10)]
+)
+
 
 def _safe_doc_id(doc_id) -> str:
     """Validate a document id from SEDO JSON before using it in a path/URL."""
     if not isinstance(doc_id, str) or not _DOC_ID_RE.match(doc_id) or ".." in doc_id:
         raise ValueError(f"Unsafe document id: {doc_id!r}")
+    stem = doc_id.split(".", 1)[0].upper()
+    if stem in _WINDOWS_RESERVED or doc_id.endswith("."):
+        # A trailing dot is stripped by Win32, so "a." and "a" collide.
+        raise ValueError(f"Unsafe document id (Windows reserved name): {doc_id!r}")
     return doc_id
+
+
+# Keys a verify endpoint may use to say "no" inside a 200 response.
+_REJECTION_FLAGS = ("authenticated", "authorized", "success", "ok", "valid", "result")
+
+
+def _verify_accepted(r) -> bool:
+    """
+    Did the verify step actually authorise us?
+
+    ``Response.ok`` alone is true for every status below 400, including 3xx
+    (a redirect back to the login page) and a 200 carrying
+    ``{"authenticated": false}``. The client then printed "Авторизація
+    успішна" and failed later in fetch_inbox() with an opaque 401 that points
+    nowhere near the real cause.
+
+    The real endpoint is still unknown (needs a Fiddler capture), so this only
+    rejects what is unambiguous: a non-2xx status, an ``error`` member, or an
+    explicit ``false`` in one of the usual flag fields. Anything else in a
+    2xx is accepted, as before.
+    """
+    status = getattr(r, "status_code", None)
+    if not isinstance(status, int) or not 200 <= status < 300:
+        return False
+    ctype = str(r.headers.get("Content-Type", "")).lower()
+    if "json" not in ctype:
+        return True
+    try:
+        body = r.json()
+    except ValueError:
+        return False  # claims JSON, isn't — not a success we can trust
+    if not isinstance(body, dict):
+        return True
+    if body.get("error"):
+        return False
+    return not any(body.get(k) is False for k in _REJECTION_FLAGS)
 
 
 # Re-exported for backwards compatibility; the implementation lives in
 # _console.py and is shared by every CLI entry point.
-from _console import force_utf8_io  # noqa: E402
+from _console import force_utf8_io, read_pin  # noqa: E402
 
 
 __all__ = ["SEDOClient", "Signer", "SEDO_MOD_URL", "IITAgentAdapter",
@@ -54,9 +104,30 @@ KEY_FILE_SEARCH_PATHS = [
 # Фіксоване посилання — СЕДО ЗСУ, не старе sedo.gov.ua
 SEDO_MOD_URL = "https://sedo.mod.gov.ua"
 
+# Valid values of SEDOClient(backend=...) and of --backend.
+_BACKENDS = ("auto", "opensc", "pkcs11", "virtual", "iit_agent")
+
 
 class Signer(Protocol):
-    """Абстрактний підписник."""
+    """
+    Абстрактний підписник.
+
+    ⚠️ ``sign()`` НЕ повертає однаковий формат у всіх backend-ах
+    (атрибут ``signature_format``):
+
+    - ``"raw"`` — opensc / pkcs11 / virtual: сирий підпис ДСТУ 4145
+      (C_Sign, 64–128 байт, без сертифіката);
+    - ``"cms"`` — iit_agent: CMS SignedData (CAdES-BES, DER, з сертифікатом).
+
+    Який із них чекає СЕДО, невідомо до Fiddler-захоплення живого входу.
+    Тому _flow_direct_kep логує формат: якщо вхід працює з одним backend-ом
+    і не працює з іншим, причина — саме тут, а не в PIN чи токені.
+
+    ``close()`` (необов'язковий) — остаточне звільнення ресурсів після
+    ``logout()``: вивантажити PKCS#11-модуль, закрити HTTP-сесію агента.
+    """
+    signature_format: str
+
     def login(self, pin: str) -> None: ...
     def get_certificate(self) -> bytes: ...
     def sign(self, data: bytes) -> bytes: ...
@@ -89,16 +160,27 @@ class SEDOClient:
         - 'iit_agent' — JSON-RPC до EUSignAgent (потребує GUI)
         - 'auto'      — opensc → pkcs11 → virtual → iit_agent
         """
+        # argparse `choices` guards only the CLI; a library caller passing
+        # backend="pkcs12" used to fall through every branch and silently get
+        # the IIT agent — which then received the PIN.
+        if name not in _BACKENDS:
+            raise ValueError(f"Unknown backend {name!r}; expected one of "
+                             f"{', '.join(_BACKENDS)}")
+
         if name in ("opensc", "auto"):
             try:
                 from opensc_signer import OpenSCSigner
-                from mechanism_ids import detect_dstu4145_mechanism
+                from mechanism_ids import (detect_dstu4145_mechanism,
+                                           detect_token_vendor)
                 if module_path is None:
                     raise ValueError("OpenSC backend requires --module path")
                 # Vendor-correct DSTU 4145 mechanism: IIT 0x80420031,
                 # Avest (Av337/avcryptoki) 0x00000352.
                 mech = f"0x{detect_dstu4145_mechanism(module_path):08X}"
                 signer = OpenSCSigner(module_path=module_path, mechanism=mech)
+                if detect_token_vendor(module_path) == "unknown":
+                    mech = self._discover_opensc_mechanism(signer, module_path, mech)
+                    signer.set_mechanism(mech)
                 log.info("Backend: OpenSC pkcs11-tool (subprocess), mechanism %s",
                          mech)
                 return signer
@@ -146,6 +228,29 @@ class SEDOClient:
             raise RuntimeError(f"No working backend: {e}")
 
     @staticmethod
+    def _discover_opensc_mechanism(signer, module_path: str, default: str) -> str:
+        """
+        Mechanism for a PKCS#11 module whose vendor the file name doesn't tell.
+
+        detect_dstu4145_mechanism() falls back to the IIT id for an unknown
+        module (e.g. opensc-pkcs11.so), and every C_Sign then failed with
+        CKR_MECHANISM_INVALID while the log said "vendor-correct". Ask the
+        token instead — --list-mechanisms needs no PIN, so this costs no
+        attempt — and apply the same policy as the PyKCS11 backends.
+        """
+        import subprocess
+        from mechanism_ids import choose_sign_mechanism
+        try:
+            mech = choose_sign_mechanism(signer.sign_mechanism_ids())
+        except (ValueError, RuntimeError, OSError, subprocess.SubprocessError) as e:
+            log.warning("Unknown PKCS#11 module %s and no usable mechanism "
+                        "list (%s); trying %s", module_path, e, default)
+            return default
+        log.info("Unknown PKCS#11 module %s: mechanism 0x%08X chosen from "
+                 "the token's list", module_path, mech)
+        return f"0x{mech:08X}"
+
+    @staticmethod
     def _find_key_file() -> Optional[str]:
         """Search standard locations for Key-6.dat (virtual token auto-detect)."""
         wine_prefix = os.environ.get("WINEPREFIX")
@@ -186,7 +291,7 @@ class SEDOClient:
         ]:
             log.info("Trying flow: %s", flow_name)
             try:
-                if flow_fn(cert, pin):
+                if flow_fn(cert):
                     log.info("✓ Authorized via %s", flow_name)
                     return
             except NotImplementedError as e:
@@ -207,7 +312,11 @@ class SEDOClient:
             "update the _flow_* methods."
         )
 
-    def _flow_oidc(self, cert: bytes, pin: str) -> bool:
+    # The flows take no PIN: login() already used it, and every frame that
+    # holds it is one more place a locals-dumping tool (pytest --showlocals,
+    # Sentry, cgitb) can print it from.
+
+    def _flow_oidc(self, cert: bytes) -> bool:
         """СЕДО → redirect → id.gov.ua КЕП login → redirect назад."""
         r = self.session.get(f"{self.sedo_url}/auth/login",
                              allow_redirects=False, timeout=10)
@@ -219,7 +328,7 @@ class SEDOClient:
         # Це окремий протокол, потребує окремої розвідки
         return False
 
-    def _flow_direct_kep(self, cert: bytes, pin: str) -> bool:
+    def _flow_direct_kep(self, cert: bytes) -> bool:
         """Сайт дає challenge, ми підписуємо, відправляємо."""
         candidates = [
             f"{self.sedo_url}/api/auth/kep/init",
@@ -257,6 +366,8 @@ class SEDOClient:
                     challenge_bytes = challenge
 
                 signature = self.signer.sign(challenge_bytes)
+                log.info("Signature: %d bytes, format %s", len(signature),
+                         getattr(self.signer, "signature_format", "unknown"))
 
                 # Замінюємо лише останній сегмент шляху, не випадкові підрядки
                 verify_url = url.rsplit("/", 1)[0] + "/verify"
@@ -265,18 +376,18 @@ class SEDOClient:
                     "certificate": base64.b64encode(cert).decode(),
                     "session_id": data.get("session_id") or data.get("id"),
                 }, timeout=10)
-                if r2.ok:
+                if _verify_accepted(r2):
                     return True
                 # Verify failed on this guessed endpoint — keep probing the
                 # remaining candidates instead of aborting on the first 200/init.
-                log.debug("verify failed for %s: HTTP %s", verify_url,
-                          getattr(r2, "status_code", "?"))
+                log.info("verify rejected by %s: HTTP %s", verify_url,
+                         getattr(r2, "status_code", "?"))
                 continue
             except (requests.RequestException, ValueError):
                 continue
         return False
 
-    def _flow_cms_post(self, cert: bytes, pin: str) -> bool:
+    def _flow_cms_post(self, cert: bytes) -> bool:
         """Повний CAdES-BES підпис, який відправляється на сервер."""
         raise NotImplementedError(
             "CMS POST flow requires Fiddler capture of real SEDO auth "
@@ -314,17 +425,29 @@ class SEDOClient:
     def __enter__(self):
         return self
 
-    def __exit__(self, *args):
-        # Close the HTTP session even if logout() raises, to avoid leaks.
+    def close(self) -> None:
+        """Log out, release the backend (DLL / agent connection), close HTTP."""
         try:
-            self.signer.logout()
+            try:
+                self.signer.logout()
+            finally:
+                close = getattr(self.signer, "close", None)
+                if callable(close):
+                    close()
         finally:
             self.session.close()
+
+    def __exit__(self, *args):
+        # Close the HTTP session even if logout() raises, to avoid leaks.
+        self.close()
         return False
 
 
 class IITAgentAdapter:
     """Адаптер IITClient до протоколу Signer."""
+    # Agent "Sign" = CAdES-BES CMS SignedData, not a raw C_Sign value.
+    signature_format = "cms"
+
     def __init__(self, client):
         self._c = client
         self._cert_bytes = None
@@ -389,6 +512,10 @@ class IITAgentAdapter:
         except IITError as e:
             log.warning("IIT agent finalize failed (ignored): %s", e)
 
+    def close(self) -> None:
+        """Close the agent HTTP connection pool (after logout)."""
+        self._c.close()
+
 
 # ═══════════════════════════════════════════════════════════════
 
@@ -400,8 +527,7 @@ def _build_parser():
     parser.add_argument("--url", default=SEDO_MOD_URL,
                         help=f"СЕДО URL (default: {SEDO_MOD_URL})")
     parser.add_argument("--backend", default="auto",
-                        choices=["auto", "opensc", "pkcs11", "virtual",
-                                 "iit_agent"],
+                        choices=list(_BACKENDS),
                         help="Signing backend")
     parser.add_argument("--module", help="Path to PKCS#11 module DLL")
     parser.add_argument("--key-file",
@@ -428,12 +554,9 @@ def main():
         format="%(asctime)s %(levelname)s %(message)s",
     )
 
-    # PIN precedence: --pin (argv, least safe) → SEDO_PIN env → interactive prompt.
-    if not args.pin:
-        args.pin = os.environ.get("SEDO_PIN")
-    if not args.pin:
-        import getpass
-        args.pin = getpass.getpass("Token PIN: ")
+    # PIN precedence: --pin (argv, least safe) → SEDO_PIN env → interactive
+    # prompt. An empty PIN exits here instead of costing a token attempt.
+    args.pin = read_pin(args.pin)
 
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -449,6 +572,10 @@ def main():
                 docs = sedo.fetch_inbox(since=args.since)
                 print(f"📄 Документів: {len(docs)}")
                 for doc in docs:
+                    if not isinstance(doc, dict):
+                        log.warning("Document entry is not an object, "
+                                    "skipping: %r", doc)
+                        continue
                     doc_id = doc.get("id")
                     if not doc_id:
                         log.warning("Document without id, skipping: %s",

@@ -52,6 +52,8 @@ def fake_pykcs11(monkeypatch):
     mod.SESSIONS = []          # every session ever opened, in order
     mod.LOGIN_ERROR = None     # exception instance raised by Session.login
     mod.SIGN_CALLS = []        # (key, mechanism id) per Session.sign
+    mod.UNLOADS = []           # module path per PyKCS11Lib.unload
+    mod.GETINFO_ERROR = None   # exception instance raised by getInfo
 
     class Mechanism:
         def __init__(self, mech_type, param=None):
@@ -126,7 +128,13 @@ def fake_pykcs11(monkeypatch):
         def load(self, path):
             self.loaded = path
 
+        def unload(self):
+            mod.UNLOADS.append(self.loaded)
+            self.loaded = None
+
         def getInfo(self):
+            if mod.GETINFO_ERROR is not None:
+                raise mod.GETINFO_ERROR
             return _LibInfo()
 
         def getSlotList(self, tokenPresent=False):

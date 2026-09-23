@@ -82,6 +82,24 @@ def close_session(session) -> None:
         log.debug("Session close error (ignored): %s", e)
 
 
+def unload_module(lib) -> None:
+    """
+    Best-effort C_Finalize + unload of a PyKCS11Lib; never raises.
+
+    logout() only closes the session: the DLL, and with it the
+    Global\\EKAlmaz1C* mutexes (see check_almaz_mutex), stayed held for the
+    whole process. The auto backend could then load a SECOND IIT module that
+    shares that mutex — exactly the conflict the warning above describes.
+    """
+    unload = getattr(lib, "unload", None)  # PyKCS11 >= 1.5.x
+    if unload is None:
+        return
+    try:
+        unload()
+    except Exception as e:
+        log.debug("PKCS#11 module unload error (ignored): %s", e)
+
+
 def _object_id(session, P, obj) -> Optional[bytes]:
     try:
         value = session.getAttributeValue(obj, [P.CKA_ID])[0]
@@ -171,6 +189,9 @@ class PKCS11Signer:
     Mechanism ID для підпису auto-discovered при першому виклику login().
     """
 
+    # Session.sign = C_Sign: a raw DSTU 4145 value, no CMS wrapper.
+    signature_format = "raw"
+
     DEFAULT_MODULE_PATHS = [
         # ─ IIT Алмаз-1К (підтверджений інсталером шлях) ─
         r"C:\Program Files (x86)\Institute of Informational Technologies\EKeys\Almaz1C\PKCS11.EKeyAlmaz1C.dll",
@@ -215,7 +236,13 @@ class PKCS11Signer:
         self.module_path = module_path
         log.info("Loading PKCS#11 module: %s", module_path)
         self._pkcs11.load(module_path)
-        info = self._pkcs11.getInfo()
+        try:
+            info = self._pkcs11.getInfo()
+        except Exception:
+            # The auto backend moves on to the next candidate — don't leave
+            # this module (and its token mutex) loaded behind it.
+            unload_module(self._pkcs11)
+            raise
         log.info("Library: %s v%d.%d, Manufacturer: %s",
                  info.libraryDescription.strip(),
                  info.libraryVersion[0], info.libraryVersion[1],
@@ -384,9 +411,14 @@ class PKCS11Signer:
             self._priv_key = None
             self._cert_obj = None
 
+    def close(self) -> None:
+        """logout() + unload the module. The signer is unusable afterwards."""
+        self.logout()
+        unload_module(self._pkcs11)
+
     def __enter__(self): return self
     def __exit__(self, *args):
-        self.logout()
+        self.close()
         return False
 
 
@@ -396,7 +428,7 @@ class PKCS11Signer:
 
 def main():
     import argparse
-    from _console import force_utf8_io
+    from _console import force_utf8_io, read_pin
     force_utf8_io()
 
     parser = argparse.ArgumentParser(
@@ -406,7 +438,7 @@ def main():
     parser.add_argument("--list-slots", action="store_true", help="Показати слоти")
     parser.add_argument("--list-mechanisms", action="store_true",
                         help="Показати підтримувані mechanisms (КРИТИЧНЕ для налаштування!)")
-    parser.add_argument("--pin", help="Token PIN")
+    parser.add_argument("--pin", help="Token PIN (or $SEDO_PIN, or the prompt)")
     parser.add_argument("--sign", metavar="FILE", help="Підписати файл")
     parser.add_argument("--output", help="Вивід підпису")
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -461,9 +493,7 @@ def main():
                   " vendor-defined → перший)")
 
     if args.sign:
-        if not args.pin:
-            import getpass
-            args.pin = getpass.getpass("PIN: ")
+        args.pin = read_pin(args.pin, "PIN: ")
 
         data = Path(args.sign).read_bytes()
         with signer:
@@ -475,7 +505,7 @@ def main():
                 print(f"✓ Signature: {len(signature)} bytes (mechanism 0x{signer._sign_mechanism:08X})")
             except Exception as e:
                 print(f"❌ Sign failed: {e}", file=sys.stderr)
-                print(f"   Try --list-mechanisms to see what's supported", file=sys.stderr)
+                print("   Try --list-mechanisms to see what's supported", file=sys.stderr)
                 sys.exit(2)
 
         output = args.output or args.sign + ".sig"

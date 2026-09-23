@@ -73,6 +73,30 @@ def _is_loopback(host: str) -> bool:
         return False
 
 
+def _as_port(value) -> Optional[int]:
+    """
+    Registry value → TCP port, or None.
+
+    The installer writes REG_DWORD, but a REG_SZ "8081" comes back as str and
+    used to flow as-is into IITClient.port and into "%d" log formats — each
+    run printed "--- Logging error --- TypeError: %d format: a real number is
+    required, not str", which looks like a crash.
+    """
+    try:
+        if isinstance(value, str):
+            text = value.strip().lower()
+            port = int(text, 16) if text.startswith("0x") else int(text)
+        else:
+            port = int(value)
+    except (TypeError, ValueError):
+        log.warning("Ignoring non-numeric agent port in registry: %r", value)
+        return None
+    if not 0 < port < 65536:
+        log.warning("Ignoring out-of-range agent port in registry: %r", value)
+        return None
+    return port
+
+
 def read_port_from_registry() -> tuple[Optional[int], Optional[int]]:
     """
     Читає HTTPPort і HTTPSPort з реєстру.
@@ -93,11 +117,11 @@ def read_port_from_registry() -> tuple[Optional[int], Optional[int]]:
             with winreg.OpenKey(hive, REGISTRY_PATH, 0,
                                 winreg.KEY_READ | winreg.KEY_WOW64_32KEY) as key:
                 try:
-                    http_port = winreg.QueryValueEx(key, "HTTPPort")[0]
+                    http_port = _as_port(winreg.QueryValueEx(key, "HTTPPort")[0])
                 except FileNotFoundError:
                     pass
                 try:
-                    https_port = winreg.QueryValueEx(key, "HTTPSPort")[0]
+                    https_port = _as_port(winreg.QueryValueEx(key, "HTTPSPort")[0])
                 except FileNotFoundError:
                     pass
                 if http_port or https_port:
@@ -134,6 +158,12 @@ def read_trusted_sites() -> list[str]:
                     except OSError:
                         break
         except FileNotFoundError:
+            continue
+        except OSError as e:
+            # e.g. PermissionError on a locked-down workstation. The two other
+            # registry readers already tolerate it; this one crashed
+            # `iit_client.py --discover` right after discovery had succeeded.
+            log.warning("Cannot read TrustedSites: %s", e)
             continue
     return sites
 
@@ -514,7 +544,7 @@ class IITClient:
         # transport failure, not IITRPCError — a lost agent during teardown
         # must not mask the original error raised from the with-block.
         try:
-            self.call("ResetPrivateKey")
+            self.reset_private_key()
         except IITError as e:
             log.debug("ResetPrivateKey during finalize ignored: %s", e)
         try:
@@ -523,6 +553,15 @@ class IITClient:
             log.debug("Finalize ignored: %s", e)
         self._initialized = False
         self._session_id = None
+
+    def close(self) -> None:
+        """
+        Закрити HTTP-сесію (пул з'єднань). Викликається після finalize().
+
+        Раніше її не закривав ніхто: довгоживучий воркер, що авторизується
+        на кожен прогін, накопичував сокети до агента.
+        """
+        self.session.close()
 
     def get_version(self) -> str:
         return self.call("GetVersion")
@@ -623,7 +662,10 @@ class IITClient:
         return self
 
     def __exit__(self, *args):
-        self.finalize()
+        try:
+            self.finalize()
+        finally:
+            self.close()
         return False
 
 
@@ -633,14 +675,14 @@ class IITClient:
 
 def main():
     import argparse
-    from _console import force_utf8_io
+    from _console import force_utf8_io, read_pin
     force_utf8_io()
     parser = argparse.ArgumentParser(description="IIT Agent client")
     parser.add_argument("--discover", action="store_true", help="Find agent and print info")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=None)
     parser.add_argument("--https", action="store_true")
-    parser.add_argument("--pin", help="Token PIN (or prompt)")
+    parser.add_argument("--pin", help="Token PIN (or $SEDO_PIN, or the prompt)")
     parser.add_argument("--list-devices", action="store_true")
     parser.add_argument("--list-certs", action="store_true", help="Login and list certificates")
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -673,9 +715,7 @@ def main():
                 print(f"  {d}")
 
         if args.list_certs:
-            if not args.pin:
-                import getpass
-                args.pin = getpass.getpass("Token PIN: ")
+            args.pin = read_pin(args.pin)
             devices = client.enum_key_media_devices()
             if not devices:
                 print("No devices found")
