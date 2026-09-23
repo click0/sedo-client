@@ -197,9 +197,15 @@ class OpenSCSigner:
         out_path = str(Path(tmp) / "data.sig")
         try:
             Path(inp_path).write_bytes(data)
+            # --id selects the private key with the SAME CKA_ID as the
+            # certificate get_certificate() exports. Without it pkcs11-tool
+            # signs with the first private key it finds, so on a token with a
+            # signing and an encryption pair the server got certificate "01"
+            # and a signature made by a different key.
             r = self._run([
                 "--login", "--pin", self._pin,
                 "--sign", "--mechanism", self._mechanism,
+                "--id", self._cert_id,
                 "--input-file", inp_path,
                 "--output-file", out_path,
             ])

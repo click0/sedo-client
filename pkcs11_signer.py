@@ -56,6 +56,94 @@ def check_almaz_mutex() -> Optional[str]:
     return None
 
 
+# ═══════════════════════════════════════════════════════════════
+# Session helpers shared by PKCS11Signer and VirtualSigner
+# ═══════════════════════════════════════════════════════════════
+
+def resolve_slot(lib, slot: Optional[int], what: str) -> int:
+    """The explicit slot, or the first slot with a token present."""
+    if slot is not None:
+        return slot
+    slots = lib.getSlotList(tokenPresent=True)
+    if not slots:
+        raise RuntimeError(f"No {what}")
+    return slots[0]
+
+
+def close_session(session) -> None:
+    """Best-effort C_Logout + C_CloseSession; never raises."""
+    try:
+        session.logout()
+    except Exception as e:
+        log.debug("Session logout error (ignored): %s", e)
+    try:
+        session.closeSession()
+    except Exception as e:
+        log.debug("Session close error (ignored): %s", e)
+
+
+def _object_id(session, P, obj) -> Optional[bytes]:
+    try:
+        value = session.getAttributeValue(obj, [P.CKA_ID])[0]
+    except Exception:
+        return None
+    return bytes(value) if value else None
+
+
+def select_key_and_cert(session, P):
+    """
+    Pick the private key and THE certificate that belongs to it.
+
+    PKCS#11 links a key to its certificate through an equal CKA_ID. Taking
+    keys[0] and certs[0] independently — as both signers used to — breaks on
+    any token that holds more than one pair (routine for MoD-issued keys: a
+    KEP signing cert plus an encryption/TLS cert). The client then sent the
+    server one certificate and a signature made by a different key; the
+    server rejected it and every local log still said "✓ Certificate".
+
+    Returns (key, cert) where cert may be None when the token has none.
+    Falls back to the first of each — the historical behaviour — only when no
+    CKA_ID pair exists, and warns if that choice is actually ambiguous.
+    """
+    keys = session.findObjects([(P.CKA_CLASS, P.CKO_PRIVATE_KEY)])
+    if not keys:
+        return None, None
+    certs = session.findObjects([(P.CKA_CLASS, P.CKO_CERTIFICATE)])
+
+    cert_by_id = {}
+    for cert in certs:
+        cid = _object_id(session, P, cert)
+        if cid is not None:
+            cert_by_id.setdefault(cid, cert)
+    for key in keys:
+        kid = _object_id(session, P, key)
+        if kid is not None and kid in cert_by_id:
+            return key, cert_by_id[kid]
+
+    if len(keys) > 1 or len(certs) > 1:
+        log.warning(
+            "Could not match a certificate to a private key by CKA_ID "
+            "(%d keys, %d certificates); using the first of each — the "
+            "certificate may not belong to the signing key", len(keys), len(certs))
+    return keys[0], (certs[0] if certs else None)
+
+
+def open_logged_in_session(lib, P, slot: int, pin: str):
+    """
+    C_OpenSession + C_Login, closing the session if anything after the open
+    fails. Previously a wrong PIN left an open, un-logged-in session behind,
+    and each retry leaked another handle — on an Almaz-1K with a small
+    session limit a few retries end in CKR_SESSION_COUNT.
+    """
+    session = lib.openSession(slot, P.CKF_RW_SESSION | P.CKF_SERIAL_SESSION)
+    try:
+        session.login(pin)
+    except Exception:
+        close_session(session)
+        raise
+    return session
+
+
 class PKCS11NotAvailable(Exception):
     """PyKCS11 не встановлено або модуль не знайдено."""
 
@@ -115,7 +203,9 @@ class PKCS11Signer:
         self._PyKCS11 = PyKCS11
         self._session = None
         self._priv_key = None
-        self._sign_mechanism = None  # lazy discovered
+        self._cert_obj = None
+        self._slot = None
+        self._sign_mechanism = None  # lazy discovered, per slot
 
         if module_path is None:
             module_path = self._find_module()
@@ -192,7 +282,8 @@ class PKCS11Signer:
             })
         return result
 
-    def find_sign_mechanism(self, prefer_dstu: bool = True) -> int:
+    def find_sign_mechanism(self, prefer_dstu: bool = True,
+                            slot: Optional[int] = None) -> int:
         """
         Знаходить правильний mechanism ID для підпису.
 
@@ -206,7 +297,10 @@ class PKCS11Signer:
         """
         from mechanism_ids import choose_sign_mechanism
 
-        mechanisms = self.list_mechanisms()
+        # The slot we are logged into, not slots[0]: with two tokens present,
+        # login(pin, slot=1) used to discover mechanisms on slot 0 and then
+        # C_SignInit an IIT vendor mechanism on, say, an Avest token.
+        mechanisms = self.list_mechanisms(slot if slot is not None else self._slot)
         signing = [m for m in mechanisms if m["can_sign"]]
         if not signing:
             raise RuntimeError("No signing mechanism supported")
@@ -238,38 +332,36 @@ class PKCS11Signer:
                 "Concurrent access may fail or corrupt token state.", held
             )
 
-        if slot is None:
-            slots = self._pkcs11.getSlotList(tokenPresent=True)
-            if not slots:
-                raise RuntimeError("No token connected")
-            slot = slots[0]
+        # Re-login must not leak the previous session handle, and must not
+        # leave a stale _priv_key pointing into a session we are replacing.
+        if self._session is not None:
+            self.logout()
 
-        flags = self._PyKCS11.CKF_RW_SESSION | self._PyKCS11.CKF_SERIAL_SESSION
-        self._session = self._pkcs11.openSession(slot, flags)
-        self._session.login(pin)
+        slot = resolve_slot(self._pkcs11, slot, "token connected")
+        session = open_logged_in_session(self._pkcs11, self._PyKCS11, slot, pin)
+        try:
+            key, cert = select_key_and_cert(session, self._PyKCS11)
+            if key is None:
+                raise RuntimeError("No private keys on token")
+            mech = self._sign_mechanism
+            if mech is None or slot != self._slot:
+                mech = self.find_sign_mechanism(slot=slot)
+        except Exception:
+            close_session(session)
+            raise
 
-        keys = self._session.findObjects([
-            (self._PyKCS11.CKA_CLASS, self._PyKCS11.CKO_PRIVATE_KEY)
-        ])
-        if not keys:
-            raise RuntimeError("No private keys on token")
-        self._priv_key = keys[0]
-
-        if self._sign_mechanism is None:
-            self._sign_mechanism = self.find_sign_mechanism()
-
-        log.info("Logged in, private key ready, mechanism=0x%08X",
-                 self._sign_mechanism)
+        self._session, self._slot = session, slot
+        self._priv_key, self._cert_obj = key, cert
+        self._sign_mechanism = mech
+        log.info("Logged in (slot %s), private key ready, mechanism=0x%08X",
+                 slot, mech)
 
     def get_certificate(self) -> bytes:
         if not self._session:
             raise RuntimeError("Not logged in")
-        certs = self._session.findObjects([
-            (self._PyKCS11.CKA_CLASS, self._PyKCS11.CKO_CERTIFICATE)
-        ])
-        if not certs:
+        if self._cert_obj is None:
             raise RuntimeError("No certificates")
-        attrs = self._session.getAttributeValue(certs[0], [self._PyKCS11.CKA_VALUE])
+        attrs = self._session.getAttributeValue(self._cert_obj, [self._PyKCS11.CKA_VALUE])
         return bytes(attrs[0])
 
     def sign(self, data: bytes, mechanism: Optional[int] = None) -> bytes:
@@ -287,16 +379,10 @@ class PKCS11Signer:
 
     def logout(self) -> None:
         if self._session:
-            try:
-                self._session.logout()
-            except Exception as e:
-                log.debug("Session logout error (ignored): %s", e)
-            try:
-                self._session.closeSession()
-            except Exception as e:
-                log.debug("Session close error (ignored): %s", e)
+            close_session(self._session)
             self._session = None
             self._priv_key = None
+            self._cert_obj = None
 
     def __enter__(self): return self
     def __exit__(self, *args):
