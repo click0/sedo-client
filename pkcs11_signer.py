@@ -220,7 +220,11 @@ class PKCS11Signer:
         else:
             # Shared 3-tier policy (known DSTU → vendor → first) — the same
             # helper VirtualSigner uses, so both backends behave identically.
-            mech = choose_sign_mechanism(m["id"] for m in signing)
+            try:
+                mech = choose_sign_mechanism(m["id"] for m in signing)
+            except ValueError as e:
+                # Only non-signature mechanisms (e.g. SYM_MAC) on the token.
+                raise RuntimeError(f"No DSTU 4145 signing mechanism: {e}") from e
         log.info("Selected sign mechanism: 0x%08X", mech)
         return mech
 
@@ -353,13 +357,22 @@ def main():
             print(f"  {m['hex']:<12} {m['name']:<35}  {s}     {v}    "
                   f"{m['min_key']}-{m['max_key']}")
 
-        # Підказка
+        # Підказка. Свідомо через choose_sign_mechanism, а не "перший
+        # vendor-defined": на Алмазі перший vendor-defined із CKF_SIGN — це
+        # 0x80420014 (SYM_MAC), і порада підписати ним спалює одну з 15
+        # PIN-спроб. login() використовує саме цю політику, тож підказка
+        # мусить збігатися з тим, що клієнт реально робить.
+        from mechanism_ids import choose_sign_mechanism
         signing = [m for m in mechs if m["can_sign"]]
-        vendor_signing = [m for m in signing if m['id'] >= 0x80000000]
         print()
-        if vendor_signing:
-            print(f"⚑ Рекомендований sign mechanism: {vendor_signing[0]['hex']}")
-            print(f"  (vendor-defined, ймовірно DSTU 4145)")
+        try:
+            rec = choose_sign_mechanism(m["id"] for m in signing)
+        except ValueError as e:
+            print(f"⚠ Немає механізму підпису ДСТУ 4145: {e}")
+        else:
+            print(f"⚑ Рекомендований sign mechanism: 0x{rec:08X}")
+            print("  (та сама політика, що й у login(): відомий ДСТУ 4145 →"
+                  " vendor-defined → перший)")
 
     if args.sign:
         if not args.pin:

@@ -94,8 +94,22 @@ class OpenSCSigner:
         safe_cmd = [("***" if i > 0 and cmd[i - 1] == "--pin" else a)
                     for i, a in enumerate(cmd)]
         log.debug("$ %s", " ".join(safe_cmd))
-        result = subprocess.run(cmd, input=input_data, capture_output=True,
-                                timeout=timeout, check=False)
+        # TimeoutExpired.__str__ embeds .cmd — the RAW argv, including
+        # "--pin <PIN>". Nothing catches it upstream, so it would be printed at
+        # ERROR level by sedo_client.main(). Keep only the scalars from the
+        # original and re-raise OUTSIDE the except block: raising inside would
+        # attach the original as __context__, and __suppress_context__ merely
+        # stops it being printed — the PIN would still be reachable from the
+        # exception chain.
+        timed_out = None
+        try:
+            result = subprocess.run(cmd, input=input_data, capture_output=True,
+                                    timeout=timeout, check=False)
+        except subprocess.TimeoutExpired as e:
+            timed_out = (e.timeout, e.output, e.stderr)
+        if timed_out is not None:
+            secs, out, err = timed_out
+            raise subprocess.TimeoutExpired(safe_cmd, secs, output=out, stderr=err)
         if result.stderr:
             log.debug("stderr: %s", result.stderr.decode("utf-8", errors="replace").rstrip())
         return result
@@ -133,6 +147,13 @@ class OpenSCSigner:
         if not self._pin:
             raise RuntimeError("PIN не встановлено — викликай login() спочатку")
         r = self._run(["--login", "--pin", self._pin, "--list-objects"])
+        if r.returncode != 0:
+            # Must raise, not return empty: pkcs11-tool does not keep a session
+            # between calls, so every operation performs its own --login. If a
+            # wrong PIN were swallowed here, main() would go on to --get-cert
+            # and --sign and burn 3 of the Almaz-1K's 15 attempts instead of 1.
+            stderr = r.stderr.decode("utf-8", errors="replace").strip()
+            raise RuntimeError(f"list-objects failed: {stderr}")
         return r.stdout.decode("utf-8", errors="replace")
 
     def get_certificate(self, object_id: Optional[str] = None) -> bytes:

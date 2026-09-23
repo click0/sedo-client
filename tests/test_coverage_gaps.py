@@ -19,17 +19,26 @@ ROOT = Path(__file__).resolve().parent.parent
 # ─── discover_agent ─────────────────────────────────────────
 
 class TestDiscoverAgent:
+    """
+    Since v0.31 a port is accepted only when probe_port (liveness) AND
+    verify_agent (it really is a JSON-RPC agent) both pass — otherwise the PIN
+    could be posted to an unrelated local service. These tests stub both.
+    """
+
     def test_registry_http_port_wins(self):
         with patch("iit_client.read_port_from_registry", return_value=(8081, 8083)), \
-             patch("iit_client.probe_port", return_value=True) as probe:
+             patch("iit_client.probe_port", return_value=True) as probe, \
+             patch("iit_client.verify_agent", return_value=True) as ver:
             assert discover_agent() == ("127.0.0.1", 8081, False)
-        probe.assert_called_once_with("127.0.0.1", 8081)
+        probe.assert_called_once_with("127.0.0.1", 8081, use_https=False)
+        ver.assert_called_once_with("127.0.0.1", 8081, use_https=False)
 
     def test_registry_https_port_when_http_dead(self):
         def probe(host, port, use_https=False, **kw):
             return use_https and port == 8083
         with patch("iit_client.read_port_from_registry", return_value=(8081, 8083)), \
-             patch("iit_client.probe_port", side_effect=probe):
+             patch("iit_client.probe_port", side_effect=probe), \
+             patch("iit_client.verify_agent", return_value=True):
             assert discover_agent() == ("127.0.0.1", 8083, True)
 
     def test_fallback_tries_http_then_https_per_port(self):
@@ -37,12 +46,15 @@ class TestDiscoverAgent:
         def probe(host, port, use_https=False, **kw):
             return use_https and port == 8083
         with patch("iit_client.read_port_from_registry", return_value=(None, None)), \
-             patch("iit_client.probe_port", side_effect=probe) as p:
+             patch("iit_client.probe_port", side_effect=probe) as p, \
+             patch("iit_client.verify_agent", return_value=True):
             assert discover_agent() == ("127.0.0.1", 8083, True)
         # 8081 http, 8081 https, 8083 http, 8083 https — in that order
         assert p.call_args_list[:4] == [
-            call("127.0.0.1", 8081), call("127.0.0.1", 8081, use_https=True),
-            call("127.0.0.1", 8083), call("127.0.0.1", 8083, use_https=True),
+            call("127.0.0.1", 8081, use_https=False),
+            call("127.0.0.1", 8081, use_https=True),
+            call("127.0.0.1", 8083, use_https=False),
+            call("127.0.0.1", 8083, use_https=True),
         ]
 
     def test_nothing_found_returns_none(self):

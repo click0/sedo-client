@@ -8,7 +8,7 @@
 # Author:   Vladyslav V. Prodan
 # Contact:  github.com/click0
 # Phone:    +38(099)6053340
-# Version:  0.27
+# Version:  0.30
 # License:  BSD 3-Clause "New" or "Revised" License
 # Year:     2025-2026
 #
@@ -17,12 +17,25 @@
 #   .\opensc-test-almaz.ps1 -Dll "..."              # явний шлях DLL
 #   .\opensc-test-almaz.ps1 -Pin 1234                # + login і перелік
 #   .\opensc-test-almaz.ps1 -Pin 1234 -TestSign      # + тест підпису
+#   .\opensc-test-almaz.ps1 -Pin 1234 -TestSign -AllMechanisms
+#
+# УВАГА, ліміт PIN Алмаз-1К (15 невдач = ключ знищено). pkcs11-tool не
+# тримає сесію: КОЖЕН виклик робить свій --login, тож при НЕПРАВИЛЬНОМУ
+# PIN кожен виклик коштує однієї спроби. Скрипт зупиняється на першій
+# невдачі логіну, тому ціна помилки — рівно 1 спроба:
+#   -Pin                          1 спроба (перелік об'єктів)
+#   -Pin -TestSign                1 спроба (далі не йдемо)
+#   -Pin -TestSign -AllMechanisms до 3 спроб, якщо PIN правильний, а
+#                                 механізми не підходять (C_Sign не
+#                                 зменшує лічильник, лічильник зменшує
+#                                 лише невдалий C_Login)
 
 param(
     [string]$Dll = "",
     [string]$OpenSCPath = "",   # автовибір 32-bit якщо не задано
     [string]$Pin,
-    [switch]$TestSign
+    [switch]$TestSign,
+    [switch]$AllMechanisms   # пробувати всі 3 механізми, не лише основний
 )
 
 [Console]::OutputEncoding = [System.Text.Encoding]::GetEncoding(1251)
@@ -248,10 +261,18 @@ if ($Pin) {
     Section "3. PKCS#11 з PIN"
 
     Write-Host "! PIN використовується. Алмаз знищить ключ після 15 невдач!" -ForegroundColor Yellow
+    Write-Host "! Неправильний PIN коштує 1 спроби — після цього скрипт зупиниться." -ForegroundColor Yellow
     Write-Host ""
 
     Write-Host ">>> Всі об'єкти:"
     & $pkcs11Tool --module $pkcs11Dll --login --pin $Pin --list-objects
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host ""
+        Write-Host "[FAIL] --login не вдався (код $LASTEXITCODE)." -ForegroundColor Red
+        Write-Host "       Зупиняємось: кожен наступний виклик — ще одна з 15 спроб." -ForegroundColor Red
+        Write-Host "       Перевірте PIN вручну перед повторним запуском." -ForegroundColor Red
+        exit 1
+    }
 
 
     Section "4. Експорт сертифіката"
@@ -277,7 +298,12 @@ if ($Pin) {
     if ($TestSign) {
         Section "6. Тест підпису"
 
-        Write-Host "! Буде виконано ОДИН підпис" -ForegroundColor Yellow
+        if ($AllMechanisms) {
+            Write-Host "! Буде виконано до 3 спроб підпису (різні механізми)" -ForegroundColor Yellow
+        } else {
+            Write-Host "! Буде виконано ОДИН підпис (0x80420031)" -ForegroundColor Yellow
+            Write-Host "  Для решти механізмів додайте -AllMechanisms" -ForegroundColor Yellow
+        }
         Write-Host "  Продовжити? (Y/N)" -ForegroundColor Yellow -NoNewline
         $confirm = Read-Host
 
@@ -285,11 +311,17 @@ if ($Pin) {
             $testData = "test $(Get-Date -Format o)"
             $testData | Out-File "test-data.txt" -Encoding ASCII -NoNewline
 
+            # За замовчуванням — лише основний механізм ІІТ. Решта лише з
+            # -AllMechanisms: PIN уже підтверджено вище, але зайві виклики
+            # безпідставно чіпають токен, а на чужому вендорі кожен невдалий
+            # --login знову коштував би спроби.
             $mechanisms = @(
-                @{Id = "0x80420031"; Name = "IIT DSTU4145 primary (EC F_2M)"},
-                @{Id = "0x80420032"; Name = "IIT DSTU4145 alt"},
-                @{Id = "0x00000352"; Name = "Standard CKM_DSTU4145"}
+                @{Id = "0x80420031"; Name = "IIT DSTU4145 primary (EC F_2M)"}
             )
+            if ($AllMechanisms) {
+                $mechanisms += @{Id = "0x80420032"; Name = "IIT DSTU4145 alt"}
+                $mechanisms += @{Id = "0x00000352"; Name = "Standard CKM_DSTU4145 (Автор/Avest)"}
+            }
 
             foreach ($m in $mechanisms) {
                 Write-Host ""
