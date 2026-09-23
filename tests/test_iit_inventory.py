@@ -303,12 +303,14 @@ class TestDiff:
     def test_baseline_without_bitness_matches_any(self):
         base = _snap("B", [{"name": "X.dll", "sha256": "1" * 64}])
         cur = _snap("C", [{"name": "x.DLL", "bitness": 64, "sha256": "1" * 64}])
-        assert inv.diff_inventories(base, cur)["unchanged"] == ["x.DLL"]
+        # Matched (bitness unknown on the baseline side); the x64 build is marked.
+        assert inv.diff_inventories(base, cur)["unchanged"] == ["x.DLL (x64)"]
 
     def test_duplicate_names_with_different_sha_are_kept(self):
         cur = _snap("C", [{"name": "A.dll", "bitness": 32, "sha256": "1" * 64},
                           {"name": "A.dll", "bitness": 32, "sha256": "2" * 64}])
-        assert len(inv.index_records(cur)) == 2
+        idx = inv.index_records(cur)
+        assert sum(len(recs) for recs in idx.values()) == 2
 
 
 class TestRender:

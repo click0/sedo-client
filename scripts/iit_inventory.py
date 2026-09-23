@@ -326,11 +326,21 @@ def extract_strings(data: bytes, min_len: int = 6) -> tuple[set[str], set[str]]:
     for m in u16_re.finditer(data):
         s = m.group().decode("utf-16le")
         # Артефакт "sCSPIBase.dll": останній символ попереднього ASCII-рядка + його
-        # NUL-термінатор виглядають як перший UTF-16-символ. Якщо байт перед
-        # збігом — друкований ASCII, перший символ належить тому рядку.
+        # NUL-термінатор виглядають як перший UTF-16-символ.
+        #
+        # Раніше перший символ відрізався, щойно байт перед збігом був
+        # друкованим — і це різало справжні рядки: b"ABC" + L"KM.PKCS11.dll"
+        # давало вигадану залежність "m.pkcs11.dll". Тепер відрізаємо лише
+        # коли ASCII-пробіг, що закінчується на першому символі, сам є рядком
+        # (довжина >= min_len), тобто його побачив би й ASCII-екстрактор.
         start = m.start()
         if start >= 1 and 0x20 <= data[start - 1] <= 0x7E:
-            s = s[1:]
+            run, i = 1, start - 1  # data[start] + printable bytes before it
+            while i >= 0 and 0x20 <= data[i] <= 0x7E and run < min_len:
+                run += 1
+                i -= 1
+            if run >= min_len:
+                s = s[1:]
         if len(s) >= min_len:
             u16.add(s)
     return asc, u16
@@ -629,23 +639,90 @@ def iter_files(inv: dict) -> Iterable[dict]:
 
 
 def index_records(inv: dict) -> dict:
-    """{(norm_name, bitness|None): record}. Дублікати з іншим sha → suffix #2, #3…"""
+    """
+    {norm_name: [record, …]} — EVERY record, grouped by name.
+
+    The previous index keyed by (name, bitness) and renamed same-key
+    duplicates to "name#2", a key no lookup ever built — so those records were
+    unreachable and a self-diff reported them as removed. Grouping keeps all of
+    them visible; pairing is done by _pair_group().
+    """
     idx: dict = {}
     for f in iter_files(inv):
-        key = (norm_name(f["name"]), f.get("bitness"))
-        if key in idx and idx[key].get("sha256") != f.get("sha256"):
-            n = 2
-            while (key[0] + f"#{n}", key[1]) in idx:
-                n += 1
-            key = (key[0] + f"#{n}", key[1])
-        idx.setdefault(key, f)
+        idx.setdefault(norm_name(f["name"]), []).append(f)
     return idx
 
 
-def _lookup(idx: dict, name: str, bitness) -> Optional[dict]:
-    key = norm_name(name)
-    return idx.get((key, bitness)) or idx.get((key, None)) or next(
-        (v for (k, b), v in idx.items() if k == key), None)
+def _bitness_compatible(a: dict, b: dict) -> bool:
+    """Known and different bitness never match: x64 is not an update of x86."""
+    ba, bb = a.get("bitness"), b.get("bitness")
+    return ba is None or bb is None or ba == bb
+
+
+def _find(idx: dict, name: str, bitness, sha: Optional[str] = None) -> Optional[dict]:
+    """
+    One record for (name, bitness) — for Δ columns and the registry.
+
+    Order: same sha, then same bitness, then a record whose bitness is unknown
+    (hand-transcribed baselines). Never a record of a different known bitness:
+    the old name-only fallback turned "x64 build removed, x86 build added" into
+    a fabricated downgrade 1.0.1.9 → 1.0.1.7.
+    """
+    group = idx.get(norm_name(name), [])
+    probe = {"bitness": bitness}
+    if sha:
+        for r in group:
+            if r.get("sha256") == sha and _bitness_compatible(r, probe):
+                return r
+    for r in group:
+        if bitness is not None and r.get("bitness") == bitness:
+            return r
+    for r in group:
+        if _bitness_compatible(r, probe):
+            return r
+    return None
+
+
+def _pair_group(base: list, cur: list) -> tuple[list, list, list]:
+    """
+    Pair the records of one file name across two inventories.
+
+    Returns (pairs, unmatched_base, unmatched_cur). Pairing order, most
+    certain first: identical sha256 → same known bitness (and relpath when
+    that disambiguates) → unknown bitness on either side. Records of different
+    known bitness are never paired.
+    """
+    base, cur = list(base), list(cur)
+    pairs = []
+
+    def take(pred):
+        for c in list(cur):
+            for b in base:
+                if pred(b, c):
+                    pairs.append((b, c))
+                    base.remove(b)
+                    cur.remove(c)
+                    break
+
+    take(lambda b, c: b.get("sha256") and b.get("sha256") == c.get("sha256")
+         and _bitness_compatible(b, c))
+    take(lambda b, c: b.get("bitness") is not None and b.get("bitness") == c.get("bitness")
+         and b.get("relpath") and b.get("relpath") == c.get("relpath"))
+    take(lambda b, c: b.get("bitness") is not None and b.get("bitness") == c.get("bitness"))
+    take(_bitness_compatible)
+    return pairs, base, cur
+
+
+def _record_label(rec: dict, dup_names: set) -> str:
+    """Name, or relpath when the name repeats; "(x64)" marks the 64-bit build."""
+    label = rec["name"]
+    if norm_name(rec["name"]) in dup_names and rec.get("relpath"):
+        label = rec["relpath"]
+    return label + (" (x64)" if rec.get("bitness") == 64 else "")
+
+
+def _dup_names(idx: dict) -> set:
+    return {k for k, recs in idx.items() if len(recs) > 1}
 
 
 _DIFF_FIELDS = ("sha256", "size", "file_version", "pe_timestamp", "exports_count",
@@ -656,14 +733,18 @@ def diff_inventories(baseline: dict, current: dict) -> dict:
     """Порівнює лише поля, присутні з обох боків; списки експортів — як ± множини."""
     base_idx = index_records(baseline)
     cur_idx = index_records(current)
+    base_dups, cur_dups = _dup_names(base_idx), _dup_names(cur_idx)
     added, removed, changed, unchanged = [], [], [], []
-    seen_base = set()
-    for (key, bitness), cur in cur_idx.items():
-        base = _lookup(base_idx, cur["name"], bitness)
-        if base is None:
-            added.append(cur["name"])
-            continue
-        seen_base.add(id(base))
+    pairs = []
+    for name in sorted(set(base_idx) | set(cur_idx)):
+        p, lone_base, lone_cur = _pair_group(base_idx.get(name, []), cur_idx.get(name, []))
+        pairs += p
+        removed += [_record_label(r, base_dups) for r in lone_base]
+        added += [_record_label(r, cur_dups) for r in lone_cur]
+
+    for base, cur in pairs:
+        bitness = cur.get("bitness")
+        label = _record_label(cur, cur_dups)
         delta: dict = {}
         for fld in _DIFF_FIELDS:
             if fld in base and fld in cur and base[fld] is not None and cur[fld] is not None \
@@ -675,15 +756,14 @@ def diff_inventories(baseline: dict, current: dict) -> dict:
                 if b != c:
                     delta[fld + "_added"] = sorted(c - b)
                     delta[fld + "_removed"] = sorted(b - c)
-        entry = {"name": cur["name"], "bitness": bitness}
+        entry = {"name": cur["name"], "label": label, "bitness": bitness}
+        if cur.get("relpath"):
+            entry["relpath"] = cur["relpath"]
         if delta:
             entry.update(delta)
             changed.append(entry)
         else:
-            unchanged.append(cur["name"])
-    for base in base_idx.values():
-        if id(base) not in seen_base:
-            removed.append(base["name"])
+            unchanged.append(label)
     return {"baseline": baseline.get("label"), "current": current.get("label"),
             "added": sorted(added), "removed": sorted(removed),
             "changed": sorted(changed, key=lambda e: e["name"].lower()),
@@ -708,11 +788,15 @@ def _md_table(headers: list[str], rows: list[list]) -> str:
 def _delta_mark(base: Optional[dict], cur: dict) -> str:
     if base is None:
         return "new"
-    if base.get("sha256") == cur.get("sha256"):
-        return "="
+    bs, cs = base.get("sha256"), cur.get("sha256")
     bv, cv = base.get("file_version"), cur.get("file_version")
+    # "=" only on real evidence: None == None used to print "identical".
+    if bs and cs and bs == cs:
+        return "="
     if bv and cv and bv != cv:
         return f"{bv} → {cv}"
+    if not (bs and cs):
+        return "?"
     return "≠sha (та сама версія)" if bv and cv else "≠sha"
 
 
@@ -752,7 +836,7 @@ def render_markdown(inv: dict, diffs: Optional[list] = None, full: bool = False)
         row = [f["name"], f.get("bitness"), f.get("file_version"), f.get("pe_timestamp"),
                fmt_size(f["size"]), short_sha(f["sha256"])]
         for _, idx in base_idxs:
-            row.append(_delta_mark(_lookup(idx, f["name"], f.get("bitness")), f))
+            row.append(_delta_mark(_find(idx, f["name"], f.get("bitness"), f.get("sha256")), f))
         rows.append(row)
     L.append(_md_table(headers, rows) if rows else "_(немає критичних файлів)_")
     L.append("")
@@ -786,7 +870,7 @@ def render_markdown(inv: dict, diffs: Optional[list] = None, full: bool = False)
         for e in d["changed"]:
             parts = []
             for k, v in e.items():
-                if k in ("name", "bitness"):
+                if k in ("name", "label", "relpath", "bitness"):
                     continue
                 if isinstance(v, list) and len(v) == 2 and not k.endswith(("_added", "_removed")):
                     a, b = v
@@ -795,7 +879,7 @@ def render_markdown(inv: dict, diffs: Optional[list] = None, full: bool = False)
                     parts.append(f"{k}: {a} → {b}")
                 elif v:
                     parts.append(f"{k}: {', '.join(map(str, v))}")
-            L.append(f"  - `{e['name']}`: " + "; ".join(parts))
+            L.append(f"  - `{e.get('label', e['name'])}`: " + "; ".join(parts))
         L.append("")
 
     L += [sec("SHA256 критичних файлів"), "", "```"]
@@ -819,29 +903,43 @@ def render_registry(snapshots: list[dict]) -> str:
     """Матриця файл × snapshot: версія / build / sha (короткий)."""
     labels = [s.get("label") or f"snapshot{i}" for i, s in enumerate(snapshots)]
     idxs = [index_records(s) for s in snapshots]
-    names: dict[str, str] = {}
+    # One row per (file, bitness). The previous name-only lookup took whichever
+    # of an x86/x64 pair came first and silently dropped the other build.
+    rows_keys: dict[tuple, str] = {}
     for s in snapshots:
         for f in iter_files(s):
-            names.setdefault(norm_name(f["name"]), f["name"])
-    order = sorted(names, key=lambda k: (not is_critical(names[k]), k))
+            rows_keys.setdefault((norm_name(f["name"]), f.get("bitness")), f["name"])
+    # A bitness-less row only survives if no snapshot knows that file's bitness.
+    known = {k for (k, b) in rows_keys if b is not None}
+    rows_keys = {kb: n for kb, n in rows_keys.items() if kb[1] is not None or kb[0] not in known}
+    order = sorted(rows_keys, key=lambda kb: (not is_critical(rows_keys[kb]), kb[0], kb[1] or 0))
     L = ["# Реєстр DLL IIT — версії по snapshot-ах", "",
          "Згенеровано `scripts/iit_inventory.py --registry`. Клітинка: `версія · build · sha256[:8]`; "
          "`=` — той самий sha, що в попередній колонці; `—` — файла немає у snapshot.", ""]
     rows = []
     for key in order:
-        row = [("**" if is_critical(names[key]) else "") + names[key] + ("**" if is_critical(names[key]) else "")]
+        name, bitness = key[0], key[1]
+        shown = rows_keys[key] + (" (x64)" if bitness == 64 else "")
+        crit = is_critical(rows_keys[key])
+        row = [("**" if crit else "") + shown + ("**" if crit else "")]
         prev_sha = None
         for idx in idxs:
-            f = _lookup(idx, names[key], None)
+            f = _find(idx, name, bitness)
             if f is None:
                 row.append("—")
+                # "=" means "same as the previous column"; after a gap that
+                # column is "—", so a reappearing file must print in full.
+                prev_sha = None
                 continue
             sha = f.get("sha256")
-            if sha and sha == prev_sha:
+            same = [r for r in idx.get(name, []) if _bitness_compatible(r, {"bitness": bitness})]
+            extra = f" (+{len(same) - 1})" if len(same) > 1 else ""
+            if sha and sha == prev_sha and not extra:
                 row.append("=")
             else:
-                row.append(f"{f.get('file_version') or '?'} · {f.get('pe_timestamp') or '?'} · `{(sha or '')[:8]}`")
-            prev_sha = sha or prev_sha
+                row.append(f"{f.get('file_version') or '?'} · {f.get('pe_timestamp') or '?'} · "
+                           f"`{(sha or '')[:8]}`{extra}")
+            prev_sha = sha
         rows.append(row)
     L.append(_md_table(["Файл"] + labels, rows))
     L.append("")
