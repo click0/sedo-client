@@ -8,6 +8,15 @@
 # Далі: python scripts/iit_inventory.py <outdir> --label <name> ...
 set -euo pipefail
 
+# Byte semantics everywhere: this script only greps BINARY files. Under a
+# UTF-8 locale (C.UTF-8 is Ubuntu's default) `grep -P "\xD0..."` runs PCRE in
+# UTF mode and reads \xD0 as the character U+00D0, not the byte 0xD0 — so the
+# OLE signature was never found and every Delphi-wrapped MSI was reported as a
+# plain "pe" that "cannot unpack".
+export LC_ALL=C
+
+OLE_SIG='\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1'
+
 usage() { echo "usage: $0 <installer.exe|.msi> <outdir>" >&2; exit 2; }
 [[ $# -eq 2 ]] || usage
 src=$1; out=$2
@@ -28,7 +37,7 @@ detect_type() {
     inno=$(strings -n 8 "$f" | grep -m1 -oE "Inno Setup Setup Data \([0-9.]+\)" || true)
     if [[ -n "$inno" ]]; then echo "inno ${inno//[^0-9.]/}"; return; fi
     if grep -qa "Nullsoft" "$f"; then echo nsis; return; fi
-    if grep -obUaP "\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1" "$f" >/dev/null 2>&1; then echo pe+msi; return; fi
+    if grep -qUaP "$OLE_SIG" "$f"; then echo pe+msi; return; fi
     if grep -qa "MSCF" "$f"; then echo cab-sfx; return; fi
     echo pe
 }
@@ -59,9 +68,18 @@ unpack_inno() {
 
 carve_msi() {
     local off
-    off=$(grep -obUaP "\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1" "$1" | head -1 | cut -d: -f1)
-    [[ -n "$off" ]] || { echo "no embedded MSI found" >&2; exit 1; }
-    dd if="$1" of="$out/_embedded.msi" bs=1 skip="$off" status=none
+    # No pipeline. `grep … | head -1` under pipefail: head exits after one line,
+    # grep takes SIGPIPE writing the rest, pipefail propagates 141, and set -e
+    # killed the script on this assignment — BEFORE the guard below, leaving an
+    # empty outdir and exit 141 on any installer with more matches than fit a
+    # pipe buffer. `-m1` stops grep itself; `|| true` keeps "no match" (rc 1)
+    # from aborting before the friendly message.
+    off=$(grep -obUaP -m1 "$OLE_SIG" "$1" || true)
+    off=${off%%:*}   # first "offset:match" pair → offset
+    [[ "$off" =~ ^[0-9]+$ ]] || { echo "no embedded MSI found" >&2; exit 1; }
+    # tail -c is a single seek; `dd bs=1 skip=` copied byte by byte (minutes on
+    # a 50 MB installer).
+    tail -c "+$((off + 1))" "$1" > "$out/_embedded.msi"
     unpack_msi "$out/_embedded.msi"
 }
 
