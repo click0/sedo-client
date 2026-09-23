@@ -57,7 +57,7 @@ cp CSPIBase.dll                    "$DLLDIR/"
 cp PKIFormats.dll                  "$DLLDIR/"
 cp EUSignCP.dll                    "$DLLDIR/"
 cp KM.dll                          "$DLLDIR/"
-cp KM_FileSystem.dll               "$DLLDIR/"
+cp KM.FileSystem.dll               "$DLLDIR/"   # з крапкою: KM.dll шукає саме це ім'я
 
 # Curve parameters (.cap files)
 cp *.cap "$DLLDIR/"

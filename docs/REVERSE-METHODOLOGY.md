@@ -44,23 +44,23 @@ Year:     2025-2026
 ### Діспетчери
 | DLL | Розмір | Роль |
 |---|---|---|
-| `EUSignRPC.dll` | 466 KB | JSON-RPC 2.0 dispatcher (~500 методів) |
+| `EUSignRPC.dll` | 466 KB | JSON-RPC 2.0 dispatcher (354 методи у 1.3.1.109) |
 
 ### Крипто-ядро
 | DLL | Розмір | Роль |
 |---|---|---|
-| `EUSignCP.dll` | 1.7 MB | Головна крипто-бібліотека (606 EU* функцій) |
-| `CSPBase.dll` | 1.15 MB | Математика ДСТУ 4145/7564/7624/8845 |
+| `EUSignCP.dll` | 1.8 MB | Головна крипто-бібліотека (619 експортів у 1.3.1.209, 630 у 1.3.1.222) |
+| `CSPBase.dll` | 1.2 MB | Математика ДСТУ 4145/7564/7624/8845 |
 | `CSPExtension.dll` | 80 KB | Статистичні тести |
-| `PKIFormats.dll` | 975 KB | ASN.1 / X.509 парсер |
+| `PKIFormats.dll` | 982 KB | ASN.1 / X.509 парсер |
 
 ### PKCS#11 модулі
 | DLL | Розмір | Роль |
 |---|---|---|
 | `PKCS11.EKeyAlmaz1C.dll` | 356 KB | Стандартний PKCS#11 для Алмаз |
 | `PKCS11.Virtual.EKeyAlmaz1C.dll` | 1.0 MB | Софт-емуляція |
-| `avcryptokinxt.dll` | 500 KB | PKCS#11 від "Автор" (SecureToken) |
-| `efitkeynxt.dll` | 1.3 MB | PKCS#11 EFIT |
+| `Av337CryptokiD.dll` | 500 KB | PKCS#11 від "Автор" (SecureToken-337/338) |
+| `avcryptokinxt.dll` = `efitkeynxt.dll` | 1.3 MB | PKCS#11 "Автор" / EFIT — **один файл під двома іменами** (однаковий sha256, ADDENDUM v4) |
 
 ### Маршрутизатори і прямі драйвери
 | DLL | Розмір | Роль |
@@ -119,9 +119,9 @@ objdump -p file.dll | awk '/Ordinal\/Name Pointer/,/PE File Base/' \
     | grep -E '^\s+\['
 ```
 
-- `EUSignCP.dll` — 606 експортів з префіксом `EU*`
-- `PKCS11.EKeyAlmaz1C.dll` — 68 експортів (стандарт PKCS#11 має 67)
-- `CSPBase.dll` — 131 експорт (`DSTU4145*`, `DSTU7564*`, `DSTU7624*`, `DSTU8845*`)
+- `EUSignCP.dll` — 619 експортів (1.3.1.209; 630 у 1.3.1.222)
+- `PKCS11.EKeyAlmaz1C.dll` — 68 експортів: повний набір `C_*` PKCS#11 v2.x
+- `CSPBase.dll` — 133 експорти (`DSTU4145*`, `DSTU7564*`, `DSTU7624*`, `DSTU8845*`)
 
 ### Крок 4. Імпорти (залежності)
 

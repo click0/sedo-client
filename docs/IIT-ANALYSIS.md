@@ -13,7 +13,7 @@ Year:     2025-2026
 **Дата:** 2026-04-16  
 **Вхід:** Web.zip (36 DLL, 11.7 MB)  
 **Метод:** статичний аналіз (objdump, strings, binary pattern matching)  
-**Для:** проект sedo-automation, ua-sign-verify  
+**Для:** проект sedo-client (раніше — sedo-automation), ua-sign-verify  
 
 ---
 
@@ -38,12 +38,12 @@ EUSignAgent.dll  ──── Mongoose HTTP/WebSocket server ────
      │
      ▼  IRPCServerDelegate
 EUSignRPC.dll   ──── JSON-RPC 2.0 dispatcher ────────────
-     │ 500+ зареєстрованих методів
+     │ 354 методи (EUSignRPC 1.3.1.109, PROTOCOL-JSON-RPC.md)
      │ Формат: {"jsonrpc":"2.0","id":N,"method":"X","params":[],"session_id":"..."}
      │
      ▼  EUSignRPCGetInterface
 EUSignCP.dll   ──── головна крипто-бібліотека ────────────
-     │ 606 експортованих функцій EU*
+     │ 619 експортів (1.3.1.209; 630 у 1.3.1.222)
      │ Підпис / верифікація / управління ключами
      │
      ▼  EUGetInterface
@@ -163,7 +163,7 @@ HKEY_LOCAL_MACHINE\SOFTWARE\Institute of Informational Technologies\Certificate 
 ```
 1. Initialize()                 — перша функція в таблиці
 2. SetSettings(opts)
-3. SetUIMode(noGui=true)
+3. SetUIMode(false)            — false = без GUI-діалогів
 4. GetHostInfo()                — інфо про робочу станцію
 5. EnumKeyMediaDevices()        — знайти підключений Алмаз
 6. ReadPrivateKey(dev, pin)     — login, PIN передається
@@ -223,7 +223,7 @@ CRL / OCSP:
 
 ## 4. EUSignCP.dll — крипто-бібліотека
 
-606 експортованих функцій з префіксом `EU*`. Ключові:
+619 експортованих функцій (1.3.1.209; 630 у 1.3.1.222). Ключові:
 
 **Життєвий цикл:**
 - `EUInitialize`, `EUFinalize`, `EUIsInitialized`, `EUGetVersion`
@@ -325,7 +325,8 @@ Reader name pattern: `IIT E.Key Almaz-1C`.
 
 **Статус:** `PKCS11.EKeyAlmaz1C.dll` отримано (див. ADDENDUM v1, v6).
 32-bit chain повністю зібраний для production:
-1. Стандартний PKCS#11 v2.40 модуль (68 функцій, 37 активних на HW)
+1. Стандартний PKCS#11 v2.40 модуль (68 функцій; на HW близько 22 — заглушки
+   `CKR_FUNCTION_NOT_SUPPORTED`, за переліком ADDENDUM v1 §2.2; v2: «20+»)
 2. Може бути завантажений у OpenSSL через pkcs11-provider
 3. На Linux працює через Wine (32-bit prefix) + pcscd для USB
 4. Шлях В1 — **production-ready** (2-3 тижні, деталі в ADDENDUM v5-v6)
@@ -334,9 +335,10 @@ Reader name pattern: `IIT E.Key Almaz-1C`.
 
 ```
 KM.dll  ─── базовий диспетчер, вибирає модуль за типом токена
- ├── KM_FileSystem.dll    ─── файлові ключі (Key-6.dat)
- ├── KM_PKCS11.dll        ─── router для зовнішніх PKCS#11 модулів
- └── KM_EKeyAlmaz1C.dll   ─── прямий HW драйвер Алмаз-1К
+ ├── KM.FileSystem.dll    ─── файлові ключі (Key-6.dat)
+ ├── KM.PKCS11.dll        ─── router для зовнішніх PKCS#11 модулів
+ └── KM.EKeyAlmaz1C.dll   ─── прямий HW драйвер Алмаз-1К
+(імена з крапкою: KM.dll вантажить їх як LoadLibraryW("KM.<Type>.dll"))
 ```
 
 ### Runtime залежності
@@ -359,7 +361,7 @@ KM.dll  ─── базовий диспетчер, вибирає модуль
 **Стало:** протокол JSON-RPC 2.0 відомий повністю, залишилось:
 
 1. **Тиждень 1:** Дамп реєстру `HKLM\...\Sign Agent` → отримати `HTTPPort`, `HTTPSPort`, `TrustedSites`
-2. **Тиждень 1-2:** Fiddler на localhost — зняти точний порядок викликів СЕДО (не WHAT а WHICH методи з 500 викликаються)
+2. **Тиждень 1-2:** Fiddler на localhost — зняти точний порядок викликів СЕДО (не WHAT а WHICH методи з 354 викликаються)
 3. **Тиждень 2:** Python клієнт:
 
 ```python
@@ -394,7 +396,7 @@ class IITClient:
 
     def authorize(self, pin):
         self.call("Initialize")
-        self.call("SetUIMode", [True])  # no GUI prompts
+        self.call("SetUIMode", [False])  # False = no GUI prompts (як у iit_client.py)
         devices = self.call("EnumKeyMediaDevices")
         self.call("ReadPrivateKey", [devices[0], pin])
         certs = self.call("EnumOwnCertificates")
@@ -424,7 +426,7 @@ class IITClient:
 
 ## 8. Прогрес
 
-### Реалізовано (v0.28)
+### Реалізовано (станом на v0.28; поточний стан — CHANGELOG.md)
 
 - ✅ Python JSON-RPC клієнт (`iit_client.py`) — з auto-discovery агента
 - ✅ OpenSC subprocess backend (`opensc_signer.py`)

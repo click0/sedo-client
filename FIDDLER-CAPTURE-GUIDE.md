@@ -89,7 +89,7 @@ winget install Telerik.Fiddler.Classic
 
 ## Що записати
 
-Створіть файл `/opt/sedo-automation/docs/sedo-flow.md` з:
+Створіть файл `docs/sedo-flow.md` у репозиторії sedo-client з:
 
 ```markdown
 ## SEDO.MOD.GOV.UA Auth Flow

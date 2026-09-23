@@ -49,8 +49,10 @@ IIT_MECHANISMS = {
 }
 
 # Поведінкова матриця: що реально працює на HW Алмаз vs Virtual токені.
-# На HW токені 31 з 68 C_* функцій — stubs (повертають CKR_FUNCTION_NOT_SUPPORTED).
-# Virtual токен реалізує все 68. Джерело: ADDENDUM v1, v2.
+# На HW токені близько 22 з 68 C_* функцій — stubs (CKR_FUNCTION_NOT_SUPPORTED):
+# перелік — ADDENDUM v1 §2.2 (v2 каже «20+»; точне число — за кількістю
+# експортів на спільну адресу stub-а, потребує бінарника).
+# Virtual токен реалізує всі 68. Джерело: ADDENDUM v1, v2.
 #
 # Ключ — mechanism ID, значення — (hw_ok, virtual_ok).
 # sedo-client використовує підпис (0x80420031/32), який працює скрізь.

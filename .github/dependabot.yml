@@ -1,8 +1,27 @@
 version: 2
 updates:
+  # One grouped PR per week instead of one per action — separate PRs touching
+  # the same workflow files conflicted with each other.
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      actions:
+        patterns: ["*"]
     commit-message:
       prefix: "ci(deps)"
+
+  # requests / PyKCS11 / pytest / pefile from pyproject.toml and
+  # requirements.txt — previously never bumped or security-scanned.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      python:
+        patterns: ["*"]
+    commit-message:
+      prefix: "build(deps)"

@@ -6,6 +6,17 @@ on:
   pull_request:
     branches: [main]
 
+# Read-only token: this job installs third-party packages and runs a build
+# backend; it needs nothing else. (Without a block it inherited the repo
+# default, which on older settings is read-write.)
+permissions:
+  contents: read
+
+# A new push to the same PR supersedes the running matrix.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -23,12 +34,19 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
+        # Through the extras, not by package name: a typo in an extra would
+        # otherwise never fail a build. [analysis] brings pefile, so the
+        # stdlib-vs-pefile cross-check in test_iit_inventory runs here too
+        # (it used to be skipped in every CI run).
         run: |
           python -m pip install --upgrade pip
-          pip install requests pytest
+          pip install ".[test,analysis]"
 
       - name: Run test suite
         run: python -m pytest tests/ -v
+
+      - name: Version headers match pyproject
+        run: python scripts/check_version.py
 
       - name: Verify package builds and installs
         run: |

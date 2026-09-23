@@ -16,7 +16,8 @@ Year:     2025-2026
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** — загальний огляд архітектури,
   data flow, розподіл відповідальностей Linux ↔ Windows
 - **[MINIMUM-FILES-LIST.md](MINIMUM-FILES-LIST.md)** — точний перелік файлів
-  для деплою (HW: 4 DLL + 9 cap ≈ 5 MB; Virtual: ще 5 DLL + Key-6.dat)
+  для деплою (HW: 4 DLL ≈ 2.6 MB + 9 малих `.cap` (+2 кеші ≈ 2.5 MB, якщо є);
+  Virtual: ще 5 DLL + Key-6.dat)
 - **[LINUX-WINE-DEPLOYMENT.md](LINUX-WINE-DEPLOYMENT.md)** — запуск без
   Windows: 32-bit Wine prefix, virtual token (Key-6.dat), playbook
   `sedo_daily_linux.yml`
@@ -52,7 +53,7 @@ Year:     2025-2026
 
 - **[PROTOCOL-JSON-RPC.md](PROTOCOL-JSON-RPC.md)** — повний опис IIT
   EUSignAgent JSON-RPC протоколу: endpoints, формат, послідовність
-  авторизації, каталог ~500 методів, 110+ JSON полів сертифіката
+  авторизації, каталог 354 методів (EUSignRPC 1.3.1.109), 110+ JSON полів сертифіката
 
 ## Швидкий індекс
 

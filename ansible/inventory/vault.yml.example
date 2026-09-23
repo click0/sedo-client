@@ -16,6 +16,8 @@ virtual_pins:
 winrm_passwords:
   ws01: "ENTER_WINRM_PASSWORD_HERE"
 
+# Reserved for the planned Telegram report — NOT used by any playbook yet.
+# Leave it out, or fill it in advance; nothing reads it today.
 telegram:
   bot_token: "1234567890:ABCDEF..."
   chat_id: "@your_channel_or_id"

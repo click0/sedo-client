@@ -19,7 +19,7 @@ Linux Ansible controller
     ▼
 Windows worker
     │
-    ├── Python Runtime (3.11/3.12)
+    ├── Python Runtime (3.11–3.13)
     │       ↓
     │   sedo_client.py — бізнес-логіка СЕДО
     │       ↓
@@ -73,17 +73,17 @@ Windows worker
 | Компонент | Роль |
 |---|---|
 | Ansible playbook | Оркестрація: запуск, моніторинг, ротація |
-| Ansible Vault | Зберігання PIN токена, Telegram bot token |
+| Ansible Vault | Зберігання PIN токена (+ ключі Telegram на майбутнє) |
 | ua-sign-verify | Post-fetch верифікація підписів документів |
 | Cron | Тригер (щодня о 8:00 або аналогічно) |
-| Telegram bot | Нотифікації про статус виконання |
+| Telegram bot | *Заплановано, не реалізовано*: нотифікації про статус |
 
 ### Windows worker
 
 | Компонент | Роль |
 |---|---|
 | WinRM HTTPS | Приймає команди від Ansible |
-| Python 3.11/3.12 | Виконує sedo_client.py |
+| Python 3.11–3.13 | Виконує sedo_client.py |
 | sedo_client | Бізнес-логіка: login, fetch, завантаження |
 | 32-bit OpenSC | pkcs11-tool (основний шлях через subprocess) |
 | IIT бібліотеки | PKCS11 модуль + криптографія |
@@ -107,7 +107,7 @@ Windows worker
 13. WinRM: fetch файлів назад на Linux
 14. Linux: для кожного ZIP — ua-sign-verify
 15. Linux: формування звіту
-16. Linux: Telegram post з результатами
+16. Linux: Telegram post з результатами (заплановано — поки лише підсумок у виводі Ansible)
 ```
 
 ## Вибір backend
@@ -182,13 +182,14 @@ Client → POST sedo.mod.gov.ua/signin
 - Не потребують спеціального догляду — створюються автоматично IIT ЦСК
 
 ### Коди помилок DLL
-Вилучено з `EUSignRPC.dll`:
+Вилучено з `EUSignRPC.dll` (коди — за специфікацією xmlrpc-epi, повна
+таблиця: `PROTOCOL-JSON-RPC.md`):
 ```
--32600  Invalid request
--32601  Requested method not found  
--32602  Invalid method parameters
--32603  Internal rpc error
--32700  Parse error
+-32600  Server error. Invalid rpc. Not conforming to spec
+-32601  Server error. Requested method not found
+-32602  Server error. Invalid method parameters
+-32603  Server error. Internal rpc error
+-32700  Parse error. Not well formed
 ```
 
 З `EUSignCP.dll`:

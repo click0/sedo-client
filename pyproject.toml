@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68.0"]
+requires = ["setuptools>=77.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,7 +7,7 @@ name = "sedo-client"
 version = "0.30"
 description = "Automation of the Ukrainian Armed Forces EDMS (sedo.mod.gov.ua)"
 readme = "README.md"
-license = {text = "BSD-3-Clause"}
+license = "BSD-3-Clause"  # SPDX (PEP 639); the {text = …} table is deprecated
 requires-python = ">=3.11"
 authors = [
     {name = "Vladyslav V. Prodan", email = "admin@support.od.ua"},

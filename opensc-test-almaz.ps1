@@ -296,7 +296,7 @@ if ($Pin) {
 
 
     if ($TestSign) {
-        Section "6. Тест підпису"
+        Section "5. Тест підпису"
 
         if ($AllMechanisms) {
             Write-Host "! Буде виконано до 3 спроб підпису (різні механізми)" -ForegroundColor Yellow

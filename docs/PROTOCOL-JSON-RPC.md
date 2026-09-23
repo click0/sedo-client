@@ -77,14 +77,22 @@ HKLM\SOFTWARE\WOW6432Node\Institute of Informational Technologies\
 
 ### Коди помилок RPC (з EUSignRPC.dll)
 
-| Код | Повідомлення |
+Рядки в DLL ідуть рівно в порядку специфікації кодів помилок xmlrpc-epi
+("Fault Code Interoperability"), тож коди — з неї:
+
+| Код | Повідомлення (дослівно з DLL) |
 |---|---|
-| `-32600` | Invalid rpc. Not conforming to spec |
-| `-32601` | Requested method not found |
-| `-32602` | Invalid method parameters |
-| `-32603` | Internal rpc error |
-| `-32700` | Parse error |
-| custom | Application error. Invalid session |
+| `-32700` | Parse error. Not well formed |
+| `-32701` | Parse error. Unsupported encoding |
+| `-32702` | Parse error. Invalid character for encoding |
+| `-32600` | Server error. Invalid rpc. Not conforming to spec |
+| `-32601` | Server error. Requested method not found |
+| `-32602` | Server error. Invalid method parameters |
+| `-32603` | Server error. Internal rpc error |
+| `-32500` | Application error |
+| `-32400` | System error |
+| `-32300` | Transport error |
+| ? | Application error. Invalid session (розширення ІІТ; код невідомий) |
 
 ### Коди помилок крипто-операцій (з EUSignCP.dll)
 
@@ -168,7 +176,7 @@ RPC-метод = експорт `EUSignCP` без префікса `EU` і бе�
 Відтворити: `strings -n 3 EUSignRPC.dll`, взяти суцільний блок ідентифікаторів
 навколо `GetOwnCertificate` (у 1.3.1.109 — рядки 5268–5621 виводу `strings`).
 
-### Ініціалізація (7)
+### Ініціалізація (8)
 - `Initialize()`, `Finalize()`, `IsInitialized()` → bool
 - `SetUIMode(bool)`, `GetVersion()` → "1.3.x", `GetHostInfo()` → {os, arch, …}
 - `ResetOperation()`, `ResetOperationCtx()`
