@@ -143,15 +143,25 @@ def detect_token_vendor(pkcs11_module_path: str) -> str:
 
 def detect_dstu4145_mechanism(pkcs11_module_path: str) -> int:
     """
-    Визначити mechanism ID за ім'ям модуля.
+    Визначити mechanism ID за ім'ям модуля — лише як запасний варіант.
 
-    IIT (Алмаз, EKeyAlmaz1C)         → 0x80420031
-    Avest (avcryptoki / Av337 / CC-33x) → 0x00000352
+    Надійне джерело — список механізмів самого токена (choose_sign_mechanism;
+    opensc-backend питає його через --list-mechanisms без PIN). Ця функція —
+    для випадку, коли список недоступний.
+
+    IIT (Алмаз, EKeyAlmaz1C)            → 0x80420031
+    «Автор» Av337CryptokiD / CC-33x     → 0x80420031 — перевірено наживо на
+        ST-338 (fw 1.3): модуль показує ІІТ-механізми 0x80420031/32 і НЕ має
+        0x00000352. Раніше тут був 0x352, і opensc-backend на цьому токені
+        отримав би CKR_MECHANISM_INVALID.
+    «Автор» avcryptokinxt / EfitKey     → 0x00000352 (не перевірено наживо)
+    Невідомий модуль                    → 0x80420031
     """
-    vendor = detect_token_vendor(pkcs11_module_path)
-    if vendor == "avest":
+    name = pkcs11_module_path.lower()
+    if detect_token_vendor(pkcs11_module_path) == "avest" \
+            and not ("av337" in name or "cc33" in name):
         return CKM_DSTU4145              # 0x00000352
-    return CKM_IIT_DSTU4145              # 0x80420031 (IIT HW/Virtual)
+    return CKM_IIT_DSTU4145              # 0x80420031
 
 
 def pick_sign_mechanism(available_ids) -> "int | None":
@@ -176,8 +186,12 @@ def pick_sign_mechanism(available_ids) -> "int | None":
 # цей ID помилково фігурував у OPENSC-QUICKSTART до v0.29. Tier 2/3 у
 # choose_sign_mechanism мусить його обходити, інакше токен без 0x80420031/32
 # отримав би MAC замість підпису.
+#
+# 0x80420015 — другий такий самий MAC (keySize 32/32, sign/verify), побачений
+# на живому ST-338 «Автор» через Av337CryptokiD.dll; у таблиці ІІТ його немає.
 NON_SIGNATURE_MECHANISMS = frozenset({
     0x80420014,
+    0x80420015,
 })
 
 

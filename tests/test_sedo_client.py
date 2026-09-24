@@ -223,7 +223,11 @@ class TestOpenSCMechanismSelection:
 
         def fake_signer(**kwargs):
             captured.update(kwargs)
-            return FakeSigner()
+            signer = FakeSigner()
+            # Token list unavailable → the name-based default must stand.
+            signer.sign_mechanism_ids = lambda: (_ for _ in ()).throw(RuntimeError("no list"))
+            signer.set_mechanism = lambda m: captured.update(mechanism=m)
+            return signer
 
         with patch("opensc_signer.OpenSCSigner", side_effect=fake_signer):
             SEDOClient(backend="opensc", module_path=module_path)
@@ -233,8 +237,12 @@ class TestOpenSCMechanismSelection:
         captured = self._capture_opensc(r"C:\libs\PKCS11.EKeyAlmaz1C.dll")
         assert captured["mechanism"] == "0x80420031"
 
-    def test_avest_module_gets_standard_mechanism(self):
+    def test_av337_fallback_is_the_iit_mechanism(self):
         captured = self._capture_opensc(r"C:\Avest\Av337CryptokiD.dll")
+        assert captured["mechanism"] == "0x80420031"
+
+    def test_avcryptoki_fallback_is_standard_mechanism(self):
+        captured = self._capture_opensc(r"C:\Avest\avcryptokinxt.dll")
         assert captured["mechanism"] == "0x00000352"
 
 

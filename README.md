@@ -92,14 +92,15 @@ Selectable backends:
 |---|---|---|
 | IIT Almaz-1K (HW) | `PKCS11.EKeyAlmaz1C.dll` | `0x80420031` |
 | IIT Almaz-1K (virtual) | `PKCS11.Virtual.EKeyAlmaz1C.dll` | `0x80420031` |
-| Автор (Avest) CC-337 / SecureToken-338 | `Av337CryptokiD.dll` | `0x00000352` |
+| Автор (Avest) CC-337 / SecureToken-338 | `Av337CryptokiD.dll` | `0x80420031` (live-verified) |
 | Автор (Avest) AvestKey / EfitKey | `avcryptokinxt.dll` | `0x00000352` |
 
 > The SecureToken-337/338 vendor is referred to as **Автор (Avtor)** or
 > **Avest / AvestUA** in different sources; both name the same hardware.
 
-The `pkcs11` backend auto-detects the correct DSTU 4145 mechanism for each
-vendor. Pass `--module` pointing at the right DLL, e.g. for ST-338:
+Every backend picks the DSTU 4145 mechanism from the token's own mechanism
+list (`opensc` asks `pkcs11-tool --list-mechanisms`, no PIN); the module name
+is only a fallback. A live ST-338 exposes the IIT ids, not `0x00000352`. Pass `--module` pointing at the right DLL, e.g. for ST-338:
 
 ```
 python sedo_client.py --backend pkcs11 --module "C:\...\Av337CryptokiD.dll"

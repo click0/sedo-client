@@ -72,14 +72,25 @@ pkcs11-tool.exe --module "C:\...\EKeys\Almaz1C\PKCS11.EKeyAlmaz1C.dll" --list-me
 | Модуль | Виробник | DSTU 4145 ID | Підхід |
 |---|---|---|---|
 | **`PKCS11.EKeyAlmaz1C.dll`** | **IIT** | **0x80420031** | Vendor-defined (CKM_VENDOR_DEFINED + IIT tag) |
-| `avcryptokinxt.dll` | ТОВ "Автор" (Avest) | `0x00000352` | Standard PKCS#11 v3.0 `CKM_DSTU4145` |
-| `Av337CryptokiD.dll` | ТОВ "Автор" (Avest), SecureToken-337/338 | `0x00000352` | Standard `CKM_DSTU4145` |
+| `avcryptokinxt.dll` | ТОВ "Автор" (Avest) | `0x00000352` | Standard PKCS#11 v3.0 `CKM_DSTU4145` (з документації, наживо не перевірено) |
+| `Av337CryptokiD.dll` | ТОВ "Автор" (Avest), SecureToken-337/338 | **`0x80420031`** | **Перевірено наживо** (ST-338, fw 1.3, копія з «Користувач ЦСК-1»): ті самі ІІТ-механізми `0x80420031/32` (EC F_2M), `0x00000352` у списку **немає** |
 | `efitkeynxt.dll` | EFIT (AvestKey/EfitKey) | `0x00000352` | Standard `CKM_DSTU4145` — той самий стек, що й `avcryptokinxt` |
 
-У `mechanism_ids.py` є автоматичний detection через `detect_dstu4145_mechanism()`:
-`detect_token_vendor()` мапить `avcryptoki` / `av337` / `cc33` / `efitkey` на
-вендора `"avest"` → `0x00000352`; усе з `ekeyalmaz1c` / `ekeycrystal` → IIT
-`0x80420031`; невідомі модулі — теж IIT (за замовчуванням).
+**Головне джерело — список механізмів самого токена.** Усі backend-и обирають
+механізм через `choose_sign_mechanism()` зі списку з `CKF_SIGN`: PyKCS11 — через
+`C_GetMechanismList`, `opensc` — через `pkcs11-tool --list-mechanisms` (без PIN).
+Симетричні MAC `0x80420014` і `0x80420015` (обидва `keySize={32,32}, sign, verify`)
+ніколи не обираються.
+
+`detect_dstu4145_mechanism()` за ім'ям модуля — лише запасний варіант, коли
+список недоступний: `av337` / `cc33` і все ІІТ → `0x80420031`; `avcryptoki` /
+`efitkey` → `0x00000352`; невідомі — `0x80420031`.
+
+Реальний рядок `pkcs11-tool` (OpenSC пише невідомі механізми як `mechtype-0x…`):
+
+```
+mechtype-0x80420031, keySize={163,509}, hw, sign, verify, EC F_2M, EC parameters, EC OID, EC compressed
+```
 
 ## Як використати
 
