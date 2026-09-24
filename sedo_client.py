@@ -170,17 +170,17 @@ class SEDOClient:
         if name in ("opensc", "auto"):
             try:
                 from opensc_signer import OpenSCSigner
-                from mechanism_ids import (detect_dstu4145_mechanism,
-                                           detect_token_vendor)
+                from mechanism_ids import detect_dstu4145_mechanism
                 if module_path is None:
                     raise ValueError("OpenSC backend requires --module path")
-                # Vendor-correct DSTU 4145 mechanism: IIT 0x80420031,
-                # Avest (Av337/avcryptoki) 0x00000352.
+                # The token's own mechanism list decides (no PIN needed);
+                # the module name is only the fallback. A live ST-338 showed
+                # why: Av337CryptokiD.dll exposes the IIT ids 0x80420031/32,
+                # not the 0x352 the name-based table assumed.
                 mech = f"0x{detect_dstu4145_mechanism(module_path):08X}"
                 signer = OpenSCSigner(module_path=module_path, mechanism=mech)
-                if detect_token_vendor(module_path) == "unknown":
-                    mech = self._discover_opensc_mechanism(signer, module_path, mech)
-                    signer.set_mechanism(mech)
+                mech = self._discover_opensc_mechanism(signer, module_path, mech)
+                signer.set_mechanism(mech)
                 log.info("Backend: OpenSC pkcs11-tool (subprocess), mechanism %s",
                          mech)
                 return signer
@@ -230,24 +230,24 @@ class SEDOClient:
     @staticmethod
     def _discover_opensc_mechanism(signer, module_path: str, default: str) -> str:
         """
-        Mechanism for a PKCS#11 module whose vendor the file name doesn't tell.
+        DSTU 4145 mechanism as the token itself reports it.
 
-        detect_dstu4145_mechanism() falls back to the IIT id for an unknown
-        module (e.g. opensc-pkcs11.so), and every C_Sign then failed with
-        CKR_MECHANISM_INVALID while the log said "vendor-correct". Ask the
-        token instead — --list-mechanisms needs no PIN, so this costs no
-        attempt — and apply the same policy as the PyKCS11 backends.
+        --list-mechanisms needs no PIN, so this costs no attempt; the policy
+        is the same choose_sign_mechanism the PyKCS11 backends use. The name
+        of the module is not enough: an unknown module fell back to the IIT id,
+        and Av337CryptokiD.dll (ST-338) turned out to expose IIT ids, not the
+        0x352 assumed for "Avtor". ``default`` (name-based) is used only when
+        the list cannot be read.
         """
         import subprocess
         from mechanism_ids import choose_sign_mechanism
         try:
             mech = choose_sign_mechanism(signer.sign_mechanism_ids())
         except (ValueError, RuntimeError, OSError, subprocess.SubprocessError) as e:
-            log.warning("Unknown PKCS#11 module %s and no usable mechanism "
-                        "list (%s); trying %s", module_path, e, default)
+            log.warning("No usable mechanism list from %s (%s); falling back "
+                        "to %s by module name", module_path, e, default)
             return default
-        log.info("Unknown PKCS#11 module %s: mechanism 0x%08X chosen from "
-                 "the token's list", module_path, mech)
+        log.info("Mechanism 0x%08X chosen from the token's list", mech)
         return f"0x{mech:08X}"
 
     @staticmethod

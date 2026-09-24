@@ -22,10 +22,14 @@ log = logging.getLogger(__name__)
 __all__ = ["OpenSCSigner", "OpenSCNotFound", "parse_sign_mechanisms"]
 
 # One line of `pkcs11-tool --list-mechanisms`. OpenSC prints mechanisms it has
-# no name for as "mechanism-0x<hex>" — which covers every DSTU 4145 id, IIT
-# vendor-defined and the standard 0x352 alike — followed by comma-separated
-# attributes, one of which is "sign" when CKF_SIGN is set.
-_MECH_LINE_RE = re.compile(r"^\s*mechanism-0x([0-9A-Fa-f]+)\b(.*)$")
+# no name for as "mechtype-0x<hex>" (p11_mechanism_to_name) — which covers
+# every DSTU 4145 id, IIT vendor-defined and the standard 0x352 alike —
+# followed by comma-separated attributes, one of which is "sign" when CKF_SIGN
+# is set. Verified on a live ST-338 (OpenSC 32-bit, 2026-09):
+#   mechtype-0x80420031, keySize={163,509}, hw, sign, verify, EC F_2M, ...
+# The first version matched "mechanism-0x" — a format made up for the tests —
+# and found nothing in real output. Both spellings are accepted.
+_MECH_LINE_RE = re.compile(r"^\s*mech(?:type|anism)-0x([0-9A-Fa-f]+)\b(.*)$")
 
 
 def parse_sign_mechanisms(lines) -> list[int]:
@@ -158,7 +162,7 @@ class OpenSCSigner:
         """
         Числові ID механізмів з CKF_SIGN (без PIN — жодної спроби не витрачає).
 
-        Лише "mechanism-0x…" рядки: механізми, які OpenSC знає за іменем
+        Лише "mechtype-0x…" рядки: механізми, які OpenSC знає за іменем
         (RSA, ECDSA…), не є ДСТУ 4145 і тут не потрібні.
         """
         r = self._run(["--list-mechanisms"])

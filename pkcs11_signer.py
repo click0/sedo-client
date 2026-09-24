@@ -183,7 +183,8 @@ class PKCS11Signer:
 
     Підтримує:
     - IIT Алмаз-1К (PKCS11.EKeyAlmaz1C.dll), mechanism 0x80420031
-    - Avest CC-337 / SecureToken-338 (Av337CryptokiD.dll), mechanism 0x00000352
+    - «Автор» CC-337 / SecureToken-338 (Av337CryptokiD.dll) — механізми ІІТ
+      0x80420031/32 (перевірено наживо на ST-338), не 0x00000352
     - Avest AvestKey / EfitKey (avcryptokinxt.dll)
 
     Mechanism ID для підпису auto-discovered при першому виклику login().
@@ -202,6 +203,8 @@ class PKCS11Signer:
         r"C:\Program Files (x86)\Avest\AvestKey\Av337CryptokiD.dll",
         r"C:\Program Files (x86)\Avest\Av337CryptokiD.dll",
         r"C:\Windows\SysWOW64\Av337CryptokiD.dll",
+        # копія, яку кладе «Користувач ЦСК-1» ІІТ (живий ST-338, 2026-09)
+        r"C:\Program Files (x86)\Institute of Informational Technologies\Certificate Authority-1.3\End User\Av337CryptokiD.dll",
         # ─ Avest AvestKey / EfitKey / AvPassG (avcryptokinxt.dll) ─
         r"C:\Program Files (x86)\Avest\AvestKey\avcryptokinxt.dll",
         r"C:\Windows\SysWOW64\avcryptokinxt.dll",

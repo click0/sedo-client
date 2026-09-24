@@ -149,6 +149,47 @@ Supported mechanisms:
 """
 
 
+# Verbatim excerpt of `pkcs11-tool --list-mechanisms` on a live Avtor ST-338
+# through the IIT copy of Av337CryptokiD.dll (OpenSC 32-bit, 2026-09-24).
+REAL_ST338 = """\
+Using slot 0 with a present token (0x0)
+Supported mechanisms:
+  RSA-PKCS, keySize={512,4096}, hw, encrypt, decrypt, sign, verify, wrap, unwrap
+  DES-MAC, keySize={8,8}, sign, verify
+  SHA256-HMAC, sign, verify
+  mechtype-0x252, sign, verify
+  ECDSA, keySize={112,521}, hw, sign, verify, EC F_P, EC parameters, EC OID, EC uncompressed
+  AES-MAC, keySize={16,32}, sign, verify
+  mechtype-0x80420011, keySize={32,32}, encrypt, decrypt, unwrap
+  mechtype-0x80420014, keySize={32,32}, sign, verify
+  mechtype-0x80420015, keySize={32,32}, sign, verify
+  mechtype-0x80420016, keySize={32,32}, wrap, unwrap
+  mechtype-0x80420021, digest
+  mechtype-0x80420031, keySize={163,509}, hw, sign, verify, EC F_2M, EC parameters, EC OID, EC compressed
+  mechtype-0x80420032, keySize={163,509}, hw, sign, verify, EC F_2M, EC parameters, EC OID, EC compressed
+  mechtype-0x80420042, keySize={163,509}, hw, generate_key_pair, EC F_2M, EC parameters, EC OID, EC compressed
+"""
+
+
+class TestRealPkcs11ToolOutput:
+    def test_real_format_is_parsed(self):
+        """The regression: the parser matched 'mechanism-0x', OpenSC prints 'mechtype-0x'."""
+        from opensc_signer import parse_sign_mechanisms
+        assert parse_sign_mechanisms(REAL_ST338.splitlines()) == [
+            0x252, 0x80420014, 0x80420015, 0x80420031, 0x80420032]
+
+    def test_real_list_chooses_dstu_not_a_mac(self):
+        from mechanism_ids import choose_sign_mechanism
+        from opensc_signer import parse_sign_mechanisms
+        ids = parse_sign_mechanisms(REAL_ST338.splitlines())
+        assert choose_sign_mechanism(ids) == 0x80420031
+
+    def test_second_mac_is_never_chosen(self):
+        from mechanism_ids import NON_SIGNATURE_MECHANISMS, choose_sign_mechanism
+        assert 0x80420015 in NON_SIGNATURE_MECHANISMS
+        assert choose_sign_mechanism([0x80420014, 0x80420015, 0x80421234]) == 0x80421234
+
+
 class TestUnknownVendorMechanism:
     def test_parse_sign_mechanisms(self):
         from opensc_signer import parse_sign_mechanisms
@@ -179,15 +220,17 @@ class TestUnknownVendorMechanism:
         assert calls and "--list-mechanisms" in calls[0]
         assert "--pin" not in calls[0]              # no PIN attempt spent
 
-    def test_known_vendor_does_not_query_the_token(self, tmp_path):
-        signer, calls = self._build(tmp_path, "PKCS11.EKeyAlmaz1C.dll")
+    def test_known_vendor_is_also_decided_by_the_token(self, tmp_path):
+        """Even a known module name is only a fallback: ST-338 proved it wrong."""
+        signer, calls = self._build(tmp_path, "Av337CryptokiD.dll",
+                                    stdout=REAL_ST338.encode())
         assert signer._mechanism == "0x80420031"
-        assert calls == []
+        assert calls and "--list-mechanisms" in calls[0] and "--pin" not in calls[0]
 
     def test_query_failure_falls_back_with_a_warning(self, tmp_path, caplog):
         signer, _ = self._build(tmp_path, "vendor-x.dll", rc=1)
         assert signer._mechanism == "0x80420031"
-        assert "no usable mechanism list" in caplog.text
+        assert "No usable mechanism list" in caplog.text
 
 
 def test_32bit_opensc_is_found_first():

@@ -39,10 +39,17 @@ class TestDetectTokenVendor:
 
 
 class TestDetectMechanismAvest:
-    def test_av337_is_standard_dstu(self):
-        """ST-338 (Av337CryptokiD.dll) uses standard 0x00000352."""
+    def test_av337_uses_iit_mechanism(self):
+        """Live ST-338 (fw 1.3) via Av337CryptokiD.dll lists 0x80420031/32 and
+        no 0x00000352 — the old mapping to 0x352 would fail every C_Sign."""
+        from mechanism_ids import detect_dstu4145_mechanism, CKM_IIT_DSTU4145
+        assert detect_dstu4145_mechanism("Av337CryptokiD.dll") == CKM_IIT_DSTU4145
+        assert detect_dstu4145_mechanism(r"C:\x\CC337.dll") == CKM_IIT_DSTU4145
+
+    def test_avcryptoki_still_standard_dstu(self):
+        """Not verified live — kept as the name-based fallback."""
         from mechanism_ids import detect_dstu4145_mechanism, CKM_DSTU4145
-        assert detect_dstu4145_mechanism("Av337CryptokiD.dll") == CKM_DSTU4145
+        assert detect_dstu4145_mechanism("avcryptokinxt.dll") == CKM_DSTU4145
 
     def test_almaz_is_vendor_dstu(self):
         from mechanism_ids import detect_dstu4145_mechanism, CKM_IIT_DSTU4145
