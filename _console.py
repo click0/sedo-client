@@ -13,11 +13,20 @@ import os
 import sys
 from typing import Optional
 
-__all__ = ["force_utf8_io", "read_pin", "PIN_ENV"]
+__all__ = ["force_utf8_io", "read_pin", "module_from_env",
+           "PIN_ENV", "MODULE_ENV", "MODULE_DIRS_ENV"]
 
 # Environment variable every CLI accepts instead of --pin (argv is visible in
 # the process list; the environment of another user's process is not).
 PIN_ENV = "SEDO_PIN"
+
+# The PKCS#11 module path, same meaning as --module (which wins when both are
+# given). Lets Ansible / Task Scheduler configure the module once per host.
+MODULE_ENV = "SEDO_MODULE"
+
+# Extra directories for module auto-discovery, os.pathsep-separated (";" on
+# Windows). Searched BEFORE the built-in list; see pkcs11_signer.module_candidates.
+MODULE_DIRS_ENV = "SEDO_MODULE_DIRS"
 
 
 def force_utf8_io() -> None:
@@ -65,3 +74,8 @@ def read_pin(argv_pin: Optional[str], prompt: str = "Token PIN: ") -> str:
               f"type it at the prompt.", file=sys.stderr)
         raise SystemExit(2)
     return pin
+
+
+def module_from_env(argv_module: Optional[str]) -> Optional[str]:
+    """``--module`` if given, else ``$SEDO_MODULE``, else None (auto-discovery)."""
+    return argv_module or os.environ.get(MODULE_ENV) or None

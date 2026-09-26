@@ -289,10 +289,10 @@ class OpenSCSigner:
 
 def main():
     import argparse
-    from _console import force_utf8_io, read_pin
+    from _console import force_utf8_io, module_from_env, read_pin
     force_utf8_io()
     parser = argparse.ArgumentParser(description="OpenSC pkcs11-tool wrapper")
-    parser.add_argument("--module", required=True, help="PKCS11_EKeyAlmaz1C.dll")
+    parser.add_argument("--module", help="PKCS#11 DLL (or $SEDO_MODULE)")
     parser.add_argument("--mechanism", default="0x80420031")
     parser.add_argument("--pkcs11-tool", help="Path to pkcs11-tool.exe")
     parser.add_argument("--list-slots", action="store_true")
@@ -309,6 +309,10 @@ def main():
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s"
     )
+
+    args.module = module_from_env(args.module)
+    if not args.module:
+        parser.error("--module or $SEDO_MODULE is required")
 
     signer = OpenSCSigner(
         module_path=args.module,

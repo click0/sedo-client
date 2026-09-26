@@ -224,6 +224,21 @@ sedo-client/
   internally, where it is visible to other local users via the process list;
   on multi-user Windows workers prefer `backend=iit_agent`
 
+## Environment variables
+
+| Variable | Meaning |
+|---|---|
+| `SEDO_PIN` | Token PIN (instead of `--pin`, which is visible in the process list) |
+| `SEDO_MODULE` | PKCS#11 module path, same as `--module` (`--module` wins) |
+| `SEDO_MODULE_DIRS` | Extra directories for module auto-discovery, `;`-separated on Windows; searched before the built-in list for the known file names (`PKCS11.EKeyAlmaz1C.dll`, `Av337CryptokiD.dll`, …) |
+
+```powershell
+$env:SEDO_MODULE_DIRS = "C:\Program Files (x86)\Institute of Informational Technologies\Certificate Authority-1.3\End User"
+python sedo_client.py --backend pkcs11 --fetch     # module found there, PIN asked
+```
+
+`opensc` has no auto-discovery: it needs `--module` or `SEDO_MODULE`.
+
 ## Tests
 
 ```bash
