@@ -225,6 +225,21 @@ sedo-client/
   процесів; на багатокористувацьких Windows-воркерах використовуйте
   `backend=iit_agent`
 
+## Змінні оточення
+
+| Змінна | Значення |
+|---|---|
+| `SEDO_PIN` | PIN токена (замість `--pin`, який видно у списку процесів) |
+| `SEDO_MODULE` | Шлях до PKCS#11-модуля, те саме що `--module` (`--module` має пріоритет) |
+| `SEDO_MODULE_DIRS` | Додаткові каталоги для автопошуку модуля, на Windows через `;`; перевіряються перед вбудованим списком за відомими іменами файлів (`PKCS11.EKeyAlmaz1C.dll`, `Av337CryptokiD.dll`, …) |
+
+```powershell
+$env:SEDO_MODULE_DIRS = "C:\Program Files (x86)\Institute of Informational Technologies\Certificate Authority-1.3\End User"
+python sedo_client.py --backend pkcs11 --fetch     # модуль знайдеться там, PIN буде запитано
+```
+
+У `opensc` автопошуку немає: потрібен `--module` або `SEDO_MODULE`.
+
 ## Тести
 
 ```bash

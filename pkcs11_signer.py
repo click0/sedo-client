@@ -10,6 +10,7 @@ Year:     2025-2026
 """
 
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Optional
@@ -59,6 +60,30 @@ def check_almaz_mutex() -> Optional[str]:
 # ═══════════════════════════════════════════════════════════════
 # Session helpers shared by PKCS11Signer and VirtualSigner
 # ═══════════════════════════════════════════════════════════════
+
+def module_candidates(defaults) -> list:
+    """
+    Where to look for a PKCS#11 module: the directories from $SEDO_MODULE_DIRS
+    first (each checked for every file name the built-in list knows), then the
+    built-in paths themselves.
+
+    The built-in lists are hard-coded and cannot cover every install layout —
+    the live ST-338 had its Av337CryptokiD.dll in the IIT "Certificate
+    Authority-1.3\\End User" directory, which was not on the list.
+    """
+    import ntpath
+    from _console import MODULE_DIRS_ENV
+    names = list(dict.fromkeys(ntpath.basename(p) for p in defaults))
+    raw = os.environ.get(MODULE_DIRS_ENV, "")
+    dirs = [d.strip() for d in raw.split(os.pathsep) if d.strip()]
+    extra = []
+    for d in dirs:
+        if not Path(d).is_dir():
+            log.warning("%s: not a directory, skipped: %s", MODULE_DIRS_ENV, d)
+            continue
+        extra += [str(Path(d) / n) for n in names]
+    return extra + list(defaults)
+
 
 def resolve_slot(lib, slot: Optional[int], what: str) -> int:
     """The explicit slot, or the first slot with a token present."""
@@ -253,13 +278,14 @@ class PKCS11Signer:
 
     @classmethod
     def _find_module(cls) -> str:
-        for path in cls.DEFAULT_MODULE_PATHS:
+        for path in module_candidates(cls.DEFAULT_MODULE_PATHS):
             if Path(path).exists():
                 return path
         raise FileNotFoundError(
             f"PKCS#11 module not found (IIT PKCS11.EKeyAlmaz1C.dll or "
-            f"Avest Av337CryptokiD.dll). Pass --module explicitly or place "
-            f"the DLL in one of: {cls.DEFAULT_MODULE_PATHS}"
+            f"Avest Av337CryptokiD.dll). Pass --module / $SEDO_MODULE, add "
+            f"its directory to $SEDO_MODULE_DIRS, or place the DLL in one of: "
+            f"{cls.DEFAULT_MODULE_PATHS}"
         )
 
     # ─── Discovery ───────────────────────────────────────────
@@ -431,13 +457,14 @@ class PKCS11Signer:
 
 def main():
     import argparse
-    from _console import force_utf8_io, read_pin
+    from _console import force_utf8_io, module_from_env, read_pin
     force_utf8_io()
 
     parser = argparse.ArgumentParser(
         description="PKCS#11 signer — для тестування PKCS11_EKeyAlmaz1C.dll"
     )
-    parser.add_argument("--module", help="Шлях до PKCS11_EKeyAlmaz1C.dll")
+    parser.add_argument("--module", help="Шлях до PKCS#11 DLL (або $SEDO_MODULE; "
+                                         "інакше автопошук, див. $SEDO_MODULE_DIRS)")
     parser.add_argument("--list-slots", action="store_true", help="Показати слоти")
     parser.add_argument("--list-mechanisms", action="store_true",
                         help="Показати підтримувані mechanisms (КРИТИЧНЕ для налаштування!)")
@@ -453,7 +480,7 @@ def main():
     )
 
     try:
-        signer = PKCS11Signer(args.module)
+        signer = PKCS11Signer(module_from_env(args.module))
     except (PKCS11NotAvailable, FileNotFoundError) as e:
         print(f"❌ {e}", file=sys.stderr)
         sys.exit(1)

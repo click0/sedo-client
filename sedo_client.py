@@ -87,7 +87,7 @@ def _verify_accepted(r) -> bool:
 
 # Re-exported for backwards compatibility; the implementation lives in
 # _console.py and is shared by every CLI entry point.
-from _console import force_utf8_io, read_pin  # noqa: E402
+from _console import force_utf8_io, module_from_env, read_pin  # noqa: E402
 
 
 __all__ = ["SEDOClient", "Signer", "SEDO_MOD_URL", "IITAgentAdapter",
@@ -529,7 +529,8 @@ def _build_parser():
     parser.add_argument("--backend", default="auto",
                         choices=list(_BACKENDS),
                         help="Signing backend")
-    parser.add_argument("--module", help="Path to PKCS#11 module DLL")
+    parser.add_argument("--module", help="Path to PKCS#11 module DLL (or $SEDO_MODULE; "
+                                         "auto-discovery also searches $SEDO_MODULE_DIRS)")
     parser.add_argument("--key-file",
                         help="Path to Key-6.dat (virtual backend). NOTE: the "
                              "virtual DLL locates Key-N.dat from its own "
@@ -563,7 +564,7 @@ def main():
 
     try:
         with SEDOClient(sedo_url=args.url, backend=args.backend,
-                        module_path=args.module,
+                        module_path=module_from_env(args.module),
                         key_file=args.key_file) as sedo:
             sedo.authorize(args.pin)
             print("✓ Авторизація успішна")

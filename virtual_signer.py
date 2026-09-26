@@ -112,11 +112,13 @@ class VirtualSigner:
 
     @classmethod
     def _find_module(cls) -> str:
-        for path in cls.DEFAULT_VIRTUAL_PATHS:
+        from pkcs11_signer import module_candidates
+        for path in module_candidates(cls.DEFAULT_VIRTUAL_PATHS):
             if Path(path).exists():
                 return path
         raise FileNotFoundError(
-            f"PKCS11.Virtual.EKeyAlmaz1C.dll not found. "
+            f"PKCS11.Virtual.EKeyAlmaz1C.dll not found. Pass --module / "
+            f"$SEDO_MODULE or add its directory to $SEDO_MODULE_DIRS. "
             f"Checked: {cls.DEFAULT_VIRTUAL_PATHS}"
         )
 
