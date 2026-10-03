@@ -4,7 +4,7 @@ PKCS#11 клієнт через subprocess до OpenSC pkcs11-tool.exe.
 Author:   Vladyslav V. Prodan
 Contact:  github.com/click0
 Phone:    +38(099)6053340
-Version:  0.30
+Version:  0.31
 License:  BSD 3-Clause "New" or "Revised" License
 Year:     2025-2026
 """
@@ -82,8 +82,10 @@ def select_cert_id(objects: list[dict], fallback: str = "01") -> str:
 
     Hard-coding "01" was right for the Almaz-1K and unknown for any other
     token (ST-338 included). With several pairs — a signing and an encryption
-    pair — the key whose Usage lists "sign" wins; several of those → the first
-    one listed, with a warning. No pair at all → ``fallback``, with a warning.
+    pair — the key whose Usage lists "sign" wins; several of those → the
+    LOWEST id, with a warning (never "the first listed": SoftHSM returns
+    objects in varying order, and a real token may too). No pair at all →
+    ``fallback``, with a warning.
     """
     keys = [o for o in objects if o["kind"] == "private_key" and o["id"]]
     cert_ids = {o["id"] for o in objects if o["kind"] == "certificate" and o["id"]}
@@ -93,10 +95,11 @@ def select_cert_id(objects: list[dict], fallback: str = "01") -> str:
                     "(%d keys, %d certificates); using --id %s",
                     len(keys), len(cert_ids), fallback)
         return fallback
-    signing = [k for k in paired if "sign" in k["usage"]] or paired
+    signing = sorted([k for k in paired if "sign" in k["usage"]] or paired,
+                     key=lambda k: k["id"])
     if len(signing) > 1:
-        log.warning("Several key/certificate pairs can sign (%s); using the first, "
-                    "%s — pass cert_id explicitly to choose another",
+        log.warning("Several key/certificate pairs can sign (%s); using the lowest "
+                    "id, %s — pass cert_id explicitly to choose another",
                     ", ".join(k["id"] for k in signing), signing[0]["id"])
     return signing[0]["id"]
 

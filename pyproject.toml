@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sedo-client"
-version = "0.30"
+version = "0.31"
 description = "Automation of the Ukrainian Armed Forces EDMS (sedo.mod.gov.ua)"
 readme = "README.md"
 license = "BSD-3-Clause"  # SPDX (PEP 639); the {text = …} table is deprecated

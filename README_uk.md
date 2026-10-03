@@ -9,7 +9,7 @@
 Author:   Vladyslav V. Prodan
 Contact:  github.com/click0
 Phone:    +38(099)6053340
-Version:  0.30
+Version:  0.31
 License:  BSD 3-Clause "New" or "Revised" License
 Year:     2025-2026
 ```
@@ -280,12 +280,12 @@ checksums вивантажуються як артефакт `release-bundle` д
 або запушити тег:
 
 ```bash
-git tag v0.30
-git push origin v0.30
+git tag v0.31
+git push origin v0.31
 ```
 
 або через веб: *Releases → Draft a new release → Choose a tag → ввести
-`v0.30` → Create new tag on publish* (target `main`). Поява тега запускає
+`v0.31` → Create new tag on publish* (target `main`). Поява тега запускає
 `release.yml`, який сам заповнює нотатки й додає файли.
 
 ## Пов'язані проекти
