@@ -266,6 +266,37 @@ License:  BSD 3-Clause "New" or "Revised" License
   каталог пропускається з попередженням.
 - `tests/test_env_module.py` — 13 тестів.
 
+### Виправлено (інтеграційний прогін на SoftHSM2 + справжньому PyKCS11)
+
+- **Backend-и `pkcs11` і `virtual` падали при `login()` на справжньому
+  PyKCS11.** `getMechanismList` повертає **імена** (`'CKM_ECDSA'`,
+  `'CKM_VENDOR_DEFINED_0x420031'`), а не числа; обидва бекенди робили
+  `int(mt)` → `ValueError` на першому ж стандартному механізмі, які має
+  будь-який токен. `getMechanismInfo` приймає лише ім'я: на int — `TypeError`
+  з C-шару. Фейковий PyKCS11 у тестах повертав числа, тому 450+ тестів цього
+  не бачили. Тепер спільні `mechanism_id` / `iter_mechanisms` /
+  `signing_mechanism_ids` у `pkcs11_signer`, а фейк поводиться як справжня
+  бібліотека (імена, `TypeError` на int) — **30 тестів падають на старому
+  коді**.
+- PyKCS11 1.5.20 дописує до списку механізм `0x1D`, якого токен не має, і
+  `getMechanismInfo` на ньому дає `CKR_MECHANISM_INVALID`. Такий запис
+  пропускається з debug-повідомленням замість падіння всього списку.
+- `PyKCS11Error` з `C_Login` / `C_Sign` загортається в `RuntimeError`
+  (`PKCS#11 login failed: …`, `sign failed: … (mechanism 0x…)`), як роблять
+  інші бекенди і як очікує `authorize()`; раніше він проходив повз усі
+  `except` і CLI.
+- **`tests/test_integration_softhsm.py`** — справжній PKCS#11-стек без
+  апаратного токена: SoftHSM2 як модуль, справжні `pkcs11-tool` і PyKCS11,
+  підписи перевіряються `openssl` проти відкритого ключа токена. Покриває
+  обидва бекенди (формати виводу, `--id`, пара ключ↔сертифікат за CKA_ID,
+  неправильний PIN без витоку сесій, `unload`), порожній PIN у CLI,
+  `SEDO_MODULE`/`SEDO_PIN`, і повний `SEDOClient.authorize()` проти локального
+  HTTP-макета СЕДО, включно з відмовою сервера. ДСТУ 4145 там немає — вибір
+  механізму підтверджено наживо на ST-338. У CI — окремий job
+  `integration-softhsm` (`SEDO_REQUIRE_SOFTHSM=1`: відсутній інструмент —
+  помилка, а не skip).
+- README: чесно про те, що перевірено наживо, а що лише на SoftHSM.
+
 ### Виправлено (жива перевірка на ST-338 «Автор»)
 
 - **Розбір `pkcs11-tool --list-mechanisms` не працював на справжньому виводі.**

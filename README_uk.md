@@ -34,7 +34,10 @@ Year:     2025-2026
 **Що працює зараз:**
 
 - Криптографічний шар: PKCS#11 підпис через IIT Алмаз-1К (HW, virtual)
-  та Автор (Avest) CC-337 / SecureToken-338 — перевірено на реальних токенах
+  та Автор (Avest) CC-337 / SecureToken-338. Наживо перевірено: backend
+  `opensc` і список механізмів ST-338; PyKCS11-бекенди (`pkcs11`, `virtual`)
+  перевірені на справжньому PKCS#11-стеку (SoftHSM2 + справжній PyKCS11, CI-job
+  `integration-softhsm`), на апаратному токені ще ні
 - Чотири backend-и: `opensc`, `pkcs11`, `virtual`, `iit_agent`
 - Ansible-автоматизація: Windows (WinRM) та Linux (Wine) playbook-и
 - CI/CD: перевірка правопису, pytest на Python 3.11–3.13, реліз з бінарниками

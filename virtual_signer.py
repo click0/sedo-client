@@ -131,17 +131,14 @@ class VirtualSigner:
         Uses the slot we logged into, not blindly slots[0].
         """
         from mechanism_ids import choose_sign_mechanism
-        from pkcs11_signer import resolve_slot
+        from pkcs11_signer import resolve_slot, signing_mechanism_ids
 
         slot = resolve_slot(self._pkcs11, slot, "virtual token slot")
 
         # Same 3-tier policy as PKCS11Signer (known DSTU → vendor → first),
-        # applied to the mechanisms that actually carry CKF_SIGN.
-        signing = [
-            int(mt) for mt in self._pkcs11.getMechanismList(slot)
-            if int(self._pkcs11.getMechanismInfo(slot, int(mt)).flags)
-            & self._PyKCS11.CKF_SIGN
-        ]
+        # applied to the mechanisms that actually carry CKF_SIGN. The id
+        # conversion lives in pkcs11_signer: PyKCS11 returns names, not ints.
+        signing = signing_mechanism_ids(self._pkcs11, self._PyKCS11, slot)
         try:
             mech = choose_sign_mechanism(signing)
         except ValueError:
@@ -204,7 +201,10 @@ class VirtualSigner:
             raise RuntimeError("No sign mechanism discovered")
 
         mech = self._PyKCS11.Mechanism(mechanism, None)
-        signature = self._session.sign(self._priv_key, data, mech)
+        try:
+            signature = self._session.sign(self._priv_key, data, mech)
+        except self._PyKCS11.PyKCS11Error as e:
+            raise RuntimeError(f"sign failed: {e} (mechanism 0x{mechanism:08X})") from e
         return bytes(signature)
 
     def logout(self) -> None:
