@@ -165,6 +165,20 @@ class TestOpenSC:
         s2.login(PIN)
         assert _verify(token.pub["02"], DIGEST, s2.sign(DIGEST), tmp_path)
 
+    def test_cka_id_is_detected_from_the_token(self, token, tmp_path, caplog):
+        """
+        No cert_id given: the pair is read from --list-objects. Both SoftHSM
+        pairs can sign, so the first (01) wins with a warning — and the
+        signature really comes from key 01.
+        """
+        from opensc_signer import OpenSCSigner
+        s = OpenSCSigner(module_path=token.module, pkcs11_tool=TOOL, mechanism="ECDSA")
+        s.login(PIN)
+        assert s.resolve_cert_id() == "01"
+        assert "Several key/certificate pairs" in caplog.text
+        assert s.get_certificate() == token.cert["01"]
+        assert _verify(token.pub["01"], DIGEST, s.sign(DIGEST), tmp_path)
+
     def test_wrong_pin_is_a_runtimeerror_without_the_pin(self, token):
         s = self._signer(token)
         s.login("0000")

@@ -166,7 +166,8 @@ class TestOpenSCTempDir:
         tool.write_bytes(b"fake")
         module = tmp_path / "PKCS11.dll"
         module.write_bytes(b"fake")
-        s = OpenSCSigner(module_path=str(module), pkcs11_tool=str(tool))
+        s = OpenSCSigner(module_path=str(module), pkcs11_tool=str(tool),
+                         cert_id="01")  # no --list-objects round-trip here
         s.login("1234")
         return s
 

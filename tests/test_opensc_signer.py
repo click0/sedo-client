@@ -67,7 +67,7 @@ class TestLoginLogout:
         module = tmp_path / "PKCS11.dll"
         module.write_bytes(b"fake")
         return OpenSCSigner(module_path=str(module),
-                            pkcs11_tool=str(tool))
+                            pkcs11_tool=str(tool), cert_id="01")
 
     def test_login_stores_pin(self, tmp_path):
         signer = self._make_signer(tmp_path)
@@ -97,7 +97,7 @@ class TestRun:
         module = tmp_path / "PKCS11.dll"
         module.write_bytes(b"fake")
         return OpenSCSigner(module_path=str(module),
-                            pkcs11_tool=str(tool))
+                            pkcs11_tool=str(tool), cert_id="01")
 
     @patch("opensc_signer.subprocess.run")
     def test_run_passes_module(self, mock_run, tmp_path):

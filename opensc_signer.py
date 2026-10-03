@@ -19,7 +19,8 @@ from typing import Optional
 
 log = logging.getLogger(__name__)
 
-__all__ = ["OpenSCSigner", "OpenSCNotFound", "parse_sign_mechanisms"]
+__all__ = ["OpenSCSigner", "OpenSCNotFound", "parse_sign_mechanisms",
+           "parse_objects", "select_cert_id"]
 
 # One line of `pkcs11-tool --list-mechanisms`. OpenSC prints mechanisms it has
 # no name for as "mechtype-0x<hex>" (p11_mechanism_to_name) — which covers
@@ -43,6 +44,61 @@ def parse_sign_mechanisms(lines) -> list[int]:
         if "sign" in flags:
             out.append(int(m.group(1), 16))
     return out
+
+
+# `pkcs11-tool --list-objects`: an object starts at column 0 ("Private Key
+# Object; EC", "Certificate Object; type = X.509 cert"), its attributes are
+# indented ("  ID:         01", "  Usage:      decrypt, sign, ..."). Verbatim
+# shape from OpenSC 0.25 against SoftHSM2; the Almaz-1K / ST-338 output in
+# SETUP-WINDOWS.md has the same layout.
+_OBJECT_HEADER_RE = re.compile(r"^(Private Key|Public Key|Certificate|Secret Key|Data) Object\b")
+
+
+def parse_objects(text: str) -> list[dict]:
+    """[{kind, label, id, usage}] for every object in `--list-objects` output."""
+    objects: list[dict] = []
+    for line in text.splitlines():
+        m = _OBJECT_HEADER_RE.match(line)
+        if m:
+            objects.append({"kind": m.group(1).lower().replace(" ", "_"),
+                            "label": None, "id": None, "usage": ()})
+            continue
+        if not objects or not line.startswith(" "):
+            continue
+        key, _, value = line.strip().partition(":")
+        value = value.strip()
+        if key == "ID":
+            objects[-1]["id"] = value.lower() or None
+        elif key == "label":
+            objects[-1]["label"] = value
+        elif key == "Usage":
+            objects[-1]["usage"] = tuple(u.strip() for u in value.split(",") if u.strip())
+    return objects
+
+
+def select_cert_id(objects: list[dict], fallback: str = "01") -> str:
+    """
+    CKA_ID to sign with: the id a certificate and a private key SHARE.
+
+    Hard-coding "01" was right for the Almaz-1K and unknown for any other
+    token (ST-338 included). With several pairs — a signing and an encryption
+    pair — the key whose Usage lists "sign" wins; several of those → the first
+    one listed, with a warning. No pair at all → ``fallback``, with a warning.
+    """
+    keys = [o for o in objects if o["kind"] == "private_key" and o["id"]]
+    cert_ids = {o["id"] for o in objects if o["kind"] == "certificate" and o["id"]}
+    paired = [k for k in keys if k["id"] in cert_ids]
+    if not paired:
+        log.warning("No private key shares a CKA_ID with a certificate "
+                    "(%d keys, %d certificates); using --id %s",
+                    len(keys), len(cert_ids), fallback)
+        return fallback
+    signing = [k for k in paired if "sign" in k["usage"]] or paired
+    if len(signing) > 1:
+        log.warning("Several key/certificate pairs can sign (%s); using the first, "
+                    "%s — pass cert_id explicitly to choose another",
+                    ", ".join(k["id"] for k in signing), signing[0]["id"])
+    return signing[0]["id"]
 
 
 class OpenSCNotFound(Exception):
@@ -85,7 +141,7 @@ class OpenSCSigner:
     def __init__(self, module_path: str,
                  mechanism: str = "0x80420031",
                  pkcs11_tool: Optional[str] = None,
-                 cert_id: str = "01"):
+                 cert_id: Optional[str] = None):
         if pkcs11_tool is None:
             pkcs11_tool = self._find_tool()
         if not Path(pkcs11_tool).exists():
@@ -94,8 +150,11 @@ class OpenSCSigner:
         self._tool = pkcs11_tool
         self._module = module_path
         self._mechanism = mechanism
-        # CKA_ID of the certificate object; "01" on Almaz-1K, may differ elsewhere.
+        # CKA_ID of the certificate/key pair. None = read it from the token on
+        # first use (select_cert_id over --list-objects); "01" is only the
+        # fallback when no pair is found.
         self._cert_id = cert_id
+        self._cert_id_explicit = cert_id is not None
         self._pin: Optional[str] = None
 
         if not Path(module_path).exists():
@@ -206,11 +265,25 @@ class OpenSCSigner:
             raise RuntimeError(f"list-objects failed: {stderr}")
         return r.stdout.decode("utf-8", errors="replace")
 
+    def resolve_cert_id(self) -> str:
+        """
+        The CKA_ID used by get_certificate() and sign().
+
+        Determined once per login from `--list-objects` (the same call that
+        validates the PIN, so a wrong PIN costs exactly one attempt here and
+        nothing is signed afterwards). An explicit ``cert_id`` is never
+        overridden.
+        """
+        if self._cert_id is None:
+            self._cert_id = select_cert_id(parse_objects(self.list_objects()))
+            log.info("Using CKA_ID %s (key/certificate pair from the token)", self._cert_id)
+        return self._cert_id
+
     def get_certificate(self, object_id: Optional[str] = None) -> bytes:
         """Експорт сертифіката у DER-форматі."""
         if not self._pin:
             raise RuntimeError("PIN не встановлено")
-        object_id = object_id or self._cert_id
+        object_id = object_id or self.resolve_cert_id()
         # Private (0700) temp dir: no predictable path in a shared /tmp,
         # so nothing can pre-create/symlink the output file.
         tmp = tempfile.mkdtemp(prefix="sedo-cert-")
@@ -255,7 +328,7 @@ class OpenSCSigner:
             r = self._run([
                 "--login", "--pin", self._pin,
                 "--sign", "--mechanism", self._mechanism,
-                "--id", self._cert_id,
+                "--id", self.resolve_cert_id(),
                 "--input-file", inp_path,
                 "--output-file", out_path,
             ])
@@ -270,8 +343,10 @@ class OpenSCSigner:
             shutil.rmtree(tmp, ignore_errors=True)
 
     def logout(self) -> None:
-        """Очистити PIN з пам'яті."""
+        """Очистити PIN з пам'яті (і авто-визначений CKA_ID — наступний логін може бути іншим токеном)."""
         self._pin = None
+        if not self._cert_id_explicit:
+            self._cert_id = None
 
     def close(self) -> None:
         """Нічого не тримає між викликами pkcs11-tool — лише logout()."""
