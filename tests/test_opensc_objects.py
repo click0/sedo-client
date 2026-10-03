@@ -69,11 +69,14 @@ class TestSelectCertId:
         text = TWO_PAIRS.replace("  ID:         01\n", "  ID:         77\n", 1)   # key 01 → 77
         assert select_cert_id(parse_objects(text)) == "02"
 
-    def test_several_signing_pairs_take_the_first_with_a_warning(self, caplog):
+    def test_several_signing_pairs_take_the_lowest_id_with_a_warning(self, caplog):
         text = TWO_PAIRS.replace("Usage:      decrypt, unwrap, derive",
                                  "Usage:      decrypt, sign, unwrap, derive")
         assert select_cert_id(parse_objects(text)) == "01"
         assert "Several key/certificate pairs" in caplog.text
+        # Listing order must not matter (SoftHSM returns objects in varying order).
+        objs = parse_objects(text)
+        assert select_cert_id(list(reversed(objs))) == "01"
 
     def test_no_pair_falls_back_with_a_warning(self, caplog):
         only_keys = "Private Key Object; EC\n  ID:         05\n  Usage:      sign\n"
@@ -83,7 +86,7 @@ class TestSelectCertId:
 
     def test_pair_without_sign_usage_still_pairs(self):
         text = TWO_PAIRS.replace("decrypt, sign, signRecover, unwrap, derive", "decrypt, unwrap")
-        assert select_cert_id(parse_objects(text)) == "01"   # first paired key
+        assert select_cert_id(parse_objects(text)) == "01"   # lowest paired id
 
 
 def _signer(tmp_path, **kw):

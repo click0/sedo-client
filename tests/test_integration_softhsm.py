@@ -168,7 +168,7 @@ class TestOpenSC:
     def test_cka_id_is_detected_from_the_token(self, token, tmp_path, caplog):
         """
         No cert_id given: the pair is read from --list-objects. Both SoftHSM
-        pairs can sign, so the first (01) wins with a warning — and the
+        pairs can sign, so the lowest id (01) wins with a warning — and the
         signature really comes from key 01.
         """
         from opensc_signer import OpenSCSigner
