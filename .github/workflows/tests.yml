@@ -56,3 +56,31 @@ jobs:
           # tree (.[test,analysis]); without it pip skips the wheel entirely.
           pip install --force-reinstall --no-deps dist/*.whl
           sedo-client --help
+
+  # Real PKCS#11 stack without a hardware token: SoftHSM2 as the module, the
+  # real pkcs11-tool and the real PyKCS11. The matrix job above runs the same
+  # file but skips it (no softhsm2 there); here a missing tool is a failure.
+  integration-softhsm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Install SoftHSM2 and OpenSC
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q softhsm2 opensc
+
+      - name: Install package with PyKCS11
+        run: |
+          python -m pip install --upgrade pip
+          pip install ".[test,pkcs11]"
+
+      - name: Integration tests
+        env:
+          SEDO_REQUIRE_SOFTHSM: "1"
+        run: python -m pytest tests/test_integration_softhsm.py -v

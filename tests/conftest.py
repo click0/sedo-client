@@ -49,11 +49,17 @@ def fake_pykcs11(monkeypatch):
     mod.OBJ_ATTRS = {}
 
     # Session bookkeeping so tests can prove handles are closed.
+    mod.BROKEN_MECHS = set()   # ids whose getMechanismInfo raises PyKCS11Error
     mod.SESSIONS = []          # every session ever opened, in order
     mod.LOGIN_ERROR = None     # exception instance raised by Session.login
     mod.SIGN_CALLS = []        # (key, mechanism id) per Session.sign
     mod.UNLOADS = []           # module path per PyKCS11Lib.unload
     mod.GETINFO_ERROR = None   # exception instance raised by getInfo
+
+    class PyKCS11Error(Exception):
+        """Stand-in for PyKCS11.PyKCS11Error (CKR_* failures)."""
+
+    mod.PyKCS11Error = PyKCS11Error
 
     class Mechanism:
         def __init__(self, mech_type, param=None):
@@ -121,6 +127,23 @@ def fake_pykcs11(monkeypatch):
             mod.SIGN_CALLS.append((key, mech.mechType))
             return mod.SIGNATURE
 
+    _STD_NAMES = {0x1041: "CKM_ECDSA", 0x1042: "CKM_ECDSA_SHA1", 0x1: "CKM_RSA_PKCS",
+                  0x250: "CKM_SHA256", 0x108A: "CKM_AES_CMAC"}
+    mod.CKM = {}
+
+    def _mech_name(mech_id):
+        name = mod.CKM.get(mech_id)
+        if name is None:
+            if mech_id in _STD_NAMES:
+                name = _STD_NAMES[mech_id]
+            elif mech_id >= 0x80000000:
+                name = f"CKM_VENDOR_DEFINED_0x{mech_id - 0x80000000:X}"
+            else:
+                name = f"CKM_UNKNOWN_0x{mech_id:X}"
+            mod.CKM[name] = mech_id
+            mod.CKM[mech_id] = name
+        return name
+
     class PyKCS11Lib:
         def __init__(self):
             self.loaded = None
@@ -144,9 +167,21 @@ def fake_pykcs11(monkeypatch):
             return _TokenInfo()
 
         def getMechanismList(self, slot):
-            return list(mod.MECHS_BY_SLOT.get(slot, mod.MECHS).keys())
+            # Like the real library: a list of CKM_* NAMES, registered in CKM
+            # both ways; vendor ids as CKM_VENDOR_DEFINED_0x<id-0x80000000>.
+            return [_mech_name(m) for m in mod.MECHS_BY_SLOT.get(slot, mod.MECHS)]
 
-        def getMechanismInfo(self, slot, mech_id):
+        def getMechanismInfo(self, slot, mech):
+            # Real PyKCS11 does CKM[mech] and passes the result to C: a name
+            # maps to its int and works, an int maps to its NAME and the C
+            # layer raises TypeError. Mirror that so int(mt)-style code fails
+            # here as it does on a real token.
+            if not isinstance(mech, str):
+                raise TypeError("in method 'CPKCS11Lib_C_GetMechanismInfo', "
+                                "argument 3 of type 'unsigned long'")
+            mech_id = mod.CKM[mech]
+            if mech_id in mod.BROKEN_MECHS:
+                raise mod.PyKCS11Error("CKR_MECHANISM_INVALID (0x00000070)")
             return _Info(mod.MECHS_BY_SLOT.get(slot, mod.MECHS).get(mech_id, 0))
 
         def openSession(self, slot, flags):

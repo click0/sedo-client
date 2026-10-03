@@ -34,7 +34,10 @@ Everything runs unattended — no operator prompts.
 **What works now:**
 
 - Cryptographic layer: PKCS#11 signing via IIT Almaz-1K (HW, virtual) and
-  Автор (Avest) CC-337 / SecureToken-338 — tested with real tokens
+  Автор (Avest) CC-337 / SecureToken-338. Live-verified so far: the `opensc`
+  backend and the mechanism list of an ST-338; the PyKCS11 backends
+  (`pkcs11`, `virtual`) are verified against a real PKCS#11 stack (SoftHSM2 +
+  real PyKCS11, CI job `integration-softhsm`), not yet against a hardware token
 - Four backends: `opensc`, `pkcs11`, `virtual`, `iit_agent`
 - Ansible automation: Windows (WinRM) and Linux (Wine) playbooks
 - CI/CD: spellcheck, pytest on Python 3.11–3.13, release with binaries

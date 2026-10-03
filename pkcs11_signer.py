@@ -11,6 +11,7 @@ Year:     2025-2026
 
 import logging
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Optional
@@ -83,6 +84,63 @@ def module_candidates(defaults) -> list:
             continue
         extra += [str(Path(d) / n) for n in names]
     return extra + list(defaults)
+
+
+_MECH_NAME_HEX_RE = re.compile(r"_0x([0-9A-Fa-f]+)$")
+
+
+def mechanism_id(P, mech) -> int:
+    """
+    Numeric CKM_* id for what PyKCS11 hands back from getMechanismList.
+
+    Real PyKCS11 returns NAMES — 'CKM_ECDSA', 'CKM_VENDOR_DEFINED_0x420031',
+    'CKM_UNKNOWN_0x352' — not ints; the module-level CKM dict maps them both
+    ways. Both backends used to do int(mt) and crashed with ValueError at
+    login() on any real token (every token exposes some standard mechanism).
+    The test fake returned ints, so nothing caught it until the SoftHSM run.
+    """
+    if isinstance(mech, int):
+        return mech
+    ckm = getattr(P, "CKM", {})
+    value = ckm.get(mech)
+    if isinstance(value, int):
+        return value
+    m = _MECH_NAME_HEX_RE.search(str(mech))
+    if m:
+        n = int(m.group(1), 16)
+        if str(mech).startswith("CKM_VENDOR_DEFINED_"):
+            n += 0x80000000
+        return n
+    raise ValueError(f"unrecognised mechanism {mech!r}")
+
+
+def iter_mechanisms(lib, P, slot: int):
+    """
+    (id, name, CK_MECHANISM_INFO) for every mechanism of ``slot``.
+
+    getMechanismInfo must receive the mechanism exactly as getMechanismList
+    returned it: real PyKCS11 wants the name (an int goes through CKM[int] →
+    name → TypeError in the C layer).
+    """
+    error_cls = getattr(P, "PyKCS11Error", Exception)
+    for mt in lib.getMechanismList(slot):
+        try:
+            info = lib.getMechanismInfo(slot, mt)
+        except error_cls as e:
+            # PyKCS11 1.5.20 appends 0x1D to every mechanism list regardless
+            # of the token; C_GetMechanismInfo on it is CKR_MECHANISM_INVALID.
+            # One bad entry must not hide the whole list (seen on SoftHSM2).
+            log.debug("Skipping mechanism %s: %s", mt, e)
+            continue
+        mech_id = mechanism_id(P, mt)
+        name = mt if isinstance(mt, str) else CKM_STANDARD.get(mech_id, f"CKM_VENDOR_0x{mech_id:08X}")
+        yield mech_id, name, info
+
+
+def signing_mechanism_ids(lib, P, slot: int) -> list[int]:
+    """Numeric ids of the mechanisms that carry CKF_SIGN."""
+    return [mech_id for mech_id, _name, info in iter_mechanisms(lib, P, slot)
+            if int(info.flags) & P.CKF_SIGN]
 
 
 def resolve_slot(lib, slot: Optional[int], what: str) -> int:
@@ -181,8 +239,13 @@ def open_logged_in_session(lib, P, slot: int, pin: str):
     session = lib.openSession(slot, P.CKF_RW_SESSION | P.CKF_SERIAL_SESSION)
     try:
         session.login(pin)
-    except Exception:
+    except Exception as e:
         close_session(session)
+        # RuntimeError is the contract every backend keeps for a token failure
+        # (authorize() collects it into "All auth flows failed"); a bare
+        # PyKCS11Error escaped past that and past the CLI's error handling.
+        if isinstance(e, getattr(P, "PyKCS11Error", ())):
+            raise RuntimeError(f"PKCS#11 login failed: {e}") from e
         raise
     return session
 
@@ -316,13 +379,8 @@ class PKCS11Signer:
                 raise RuntimeError("No token")
             slot = slots[0]
 
-        mech_types = self._pkcs11.getMechanismList(slot)
         result = []
-        for mt in mech_types:
-            # mt — числовий ID
-            mech_id = int(mt)
-            info = self._pkcs11.getMechanismInfo(slot, mech_id)
-            name = CKM_STANDARD.get(mech_id, f"CKM_VENDOR_0x{mech_id:08X}")
+        for mech_id, name, info in iter_mechanisms(self._pkcs11, self._PyKCS11, slot):
             # Перевірити чи має Sign flag
             flags = int(info.flags)
             can_sign = bool(flags & self._PyKCS11.CKF_SIGN)
@@ -430,7 +488,10 @@ class PKCS11Signer:
             raise RuntimeError("No sign mechanism. Use find_sign_mechanism() first")
 
         mech = self._PyKCS11.Mechanism(mechanism, None)
-        signature = self._session.sign(self._priv_key, data, mech)
+        try:
+            signature = self._session.sign(self._priv_key, data, mech)
+        except self._PyKCS11.PyKCS11Error as e:
+            raise RuntimeError(f"sign failed: {e} (mechanism 0x{mechanism:08X})") from e
         return bytes(signature)
 
     def logout(self) -> None:
