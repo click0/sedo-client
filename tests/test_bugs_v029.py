@@ -206,13 +206,13 @@ class TestOpenSCEmptyOutput:
     def test_sign_empty_output_raises(self, mock_run, tmp_path):
         mock_run.side_effect = self._empty_run
         with pytest.raises(RuntimeError, match="empty signature"):
-            _opensc(tmp_path).sign(b"data")
+            _opensc(tmp_path, cert_id="01").sign(b"data")
 
     @patch("opensc_signer.subprocess.run")
     def test_get_certificate_empty_output_raises(self, mock_run, tmp_path):
         mock_run.side_effect = self._empty_run
         with pytest.raises(RuntimeError, match="empty certificate"):
-            _opensc(tmp_path).get_certificate()
+            _opensc(tmp_path, cert_id="01").get_certificate()
 
     @patch("opensc_signer.subprocess.run")
     def test_cert_id_kwarg_used(self, mock_run, tmp_path):
