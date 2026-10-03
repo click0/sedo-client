@@ -48,6 +48,15 @@ jobs:
       - name: Version headers match pyproject
         run: python scripts/check_version.py
 
+      - name: Verify package builds and installs
+        run: |
+          pip install build
+          python -m build --wheel
+          # --force-reinstall: the package is already installed from the source
+          # tree (.[test,analysis]); without it pip skips the wheel entirely.
+          pip install --force-reinstall --no-deps dist/*.whl
+          sedo-client --help
+
   # Real PKCS#11 stack without a hardware token: SoftHSM2 as the module, the
   # real pkcs11-tool and the real PyKCS11. The matrix job above runs the same
   # file but skips it (no softhsm2 there); here a missing tool is a failure.
@@ -75,12 +84,3 @@ jobs:
         env:
           SEDO_REQUIRE_SOFTHSM: "1"
         run: python -m pytest tests/test_integration_softhsm.py -v
-
-      - name: Verify package builds and installs
-        run: |
-          pip install build
-          python -m build --wheel
-          # --force-reinstall: the package is already installed from the source
-          # tree (.[test,analysis]); without it pip skips the wheel entirely.
-          pip install --force-reinstall --no-deps dist/*.whl
-          sedo-client --help
