@@ -4,7 +4,6 @@ header-consistency check tests.yml runs on every push.
 """
 
 import importlib.util
-import sys
 from pathlib import Path
 
 import pytest
@@ -24,8 +23,13 @@ cv = _load()
 
 
 def _repo(tmp_path, version="0.31", heading="## v0.31 — 2026-10-01", headers=None):
-    (tmp_path / "pyproject.toml").write_text(f'[project]\nname = "x"\nversion = "{version}"\n')
-    (tmp_path / "CHANGELOG.md").write_text(f"# CHANGELOG\n\n{heading}\n\n- x\n\n## v0.30 — 2026-09-12\n")
+    # encoding= is not optional: on Windows write_text() defaults to cp1252,
+    # the "—" became 0x97 and the UTF-8 read in check_version failed — which
+    # broke the v0.31 release build on the Windows runner.
+    (tmp_path / "pyproject.toml").write_text(f'[project]\nname = "x"\nversion = "{version}"\n',
+                                             encoding="utf-8")
+    (tmp_path / "CHANGELOG.md").write_text(f"# CHANGELOG\n\n{heading}\n\n- x\n\n## v0.30 — 2026-09-12\n",
+                                           encoding="utf-8")
     for name, content in (headers or {}).items():
         p = tmp_path / name
         p.parent.mkdir(parents=True, exist_ok=True)

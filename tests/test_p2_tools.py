@@ -289,7 +289,7 @@ class TestExportLists:
 class TestCLI:
     def _snapfile(self, tmp_path, name="s.json"):
         p = tmp_path / name
-        p.write_text(json.dumps(_snap("S", [{"name": "A.dll", "sha256": "1" * 64}])))
+        p.write_text(json.dumps(_snap("S", [{"name": "A.dll", "sha256": "1" * 64}])), encoding="utf-8")
         return p
 
     def test_registry_with_a_directory_is_a_usage_error(self, tmp_path, capsys):
