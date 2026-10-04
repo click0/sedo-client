@@ -102,7 +102,7 @@ def token(tmp_path_factory):
     (d / "tokens").mkdir()
     conf = d / "softhsm2.conf"
     conf.write_text(f"directories.tokendir = {d / 'tokens'}\n"
-                    "objectstore.backend = file\nlog.level = ERROR\n")
+                    "objectstore.backend = file\nlog.level = ERROR\n", encoding="utf-8")
     saved = os.environ.get("SOFTHSM2_CONF")
     os.environ["SOFTHSM2_CONF"] = str(conf)   # read by the library at load time
     _run([UTIL, "--init-token", "--free", "--label", "SEDO-TEST",
