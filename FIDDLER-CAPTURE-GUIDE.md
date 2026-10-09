@@ -1,5 +1,14 @@
 # Fiddler Capture Guide — SEDO ЗСУ auth flow
 
+```
+Project:  sedo-client
+Author:   Vladyslav V. Prodan
+Contact:  github.com/click0
+Version:  0.31
+License:  BSD 3-Clause "New" or "Revised" License
+Year:     2025-2026
+```
+
 **Мета:** зафіксувати точний flow авторизації на sedo.mod.gov.ua для уточнення 
 sedo_client.py (заповнити TODO у _flow_oidc / _flow_direct_kep / _flow_cms_post).
 
