@@ -7,6 +7,21 @@ Contact:  github.com/click0
 License:  BSD 3-Clause "New" or "Revised" License
 ```
 
+## v0.32 — unreleased
+
+### CI
+
+- **Тести ганяються на Windows на кожен PR** (job `windows`, Python 3.12).
+  До v0.31 Windows-прогін був лише в `release.yml`, тож помилка, що
+  проявляється тільки там (`write_text()` без `encoding` → cp1252 замість
+  UTF-8), вперше спливла на релізному тегу і коштувала перенесення тега.
+
+### Документація
+
+- `FIDDLER-CAPTURE-GUIDE.md` і `OPENSC-QUICKSTART.md` отримали стандартний
+  блок заголовка (Project/Author/Version/License), як решта документів;
+  `check_version.py` тепер стежить і за ними.
+
 ## v0.31 — 2026-10-03
 
 ### Головне

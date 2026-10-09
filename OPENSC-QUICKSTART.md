@@ -1,5 +1,14 @@
 # OpenSC Quickstart — через IIT PKCS#11 module
 
+```
+Project:  sedo-client
+Author:   Vladyslav V. Prodan
+Contact:  github.com/click0
+Version:  0.31
+License:  BSD 3-Clause "New" or "Revised" License
+Year:     2025-2026
+```
+
 **⚠️ Важливо:** Алмаз-1К — пропрієтарна картка IIT. OpenSC **не має вбудованого драйвера** для неї,
 тому `pkcs15-tool`, `opensc-explorer` і інші tools що читають картку напряму **не працюватимуть**.
 

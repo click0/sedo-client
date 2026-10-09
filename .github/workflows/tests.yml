@@ -57,6 +57,31 @@ jobs:
           pip install --force-reinstall --no-deps dist/*.whl
           sedo-client --help
 
+  # The suite on Windows. Until v0.31 Windows ran only inside release.yml, so
+  # a Windows-only failure (write_text() without encoding → cp1252) surfaced
+  # for the first time on the release tag and cost a tag move. No PyKCS11
+  # here: the fake covers it, SoftHSM covers the real library on Linux.
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ".[test,analysis]"
+
+      - name: Run test suite
+        run: python -m pytest tests/ -v
+
+      - name: Version headers match pyproject
+        run: python scripts/check_version.py
+
   # Real PKCS#11 stack without a hardware token: SoftHSM2 as the module, the
   # real pkcs11-tool and the real PyKCS11. The matrix job above runs the same
   # file but skips it (no softhsm2 there); here a missing tool is a failure.
