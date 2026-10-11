@@ -47,7 +47,8 @@ def force_utf8_io() -> None:
             pass
 
 
-def read_pin(argv_pin: Optional[str], prompt: str = "Token PIN: ") -> str:
+def read_pin(argv_pin: Optional[str], prompt: str = "Token PIN: ",
+             env_vars=(PIN_ENV,)) -> str:
     """
     Resolve the token PIN: ``--pin`` → ``$SEDO_PIN`` → interactive prompt.
 
@@ -59,9 +60,16 @@ def read_pin(argv_pin: Optional[str], prompt: str = "Token PIN: ") -> str:
       C_Login spends one of the 15 attempts before the key is destroyed —
       an empty PIN is a guaranteed failure, so it must never reach the token.
 
+    ``env_vars``: environment variables tried in order (default: SEDO_PIN;
+    sedo_config passes the profile-specific ones, or none).
+
     Raises SystemExit (exit code 2, like an argparse usage error).
     """
-    pin = argv_pin or os.environ.get(PIN_ENV)
+    pin = argv_pin
+    for var in env_vars:
+        if pin:
+            break
+        pin = os.environ.get(var)
     if not pin:
         import getpass
         try:

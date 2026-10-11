@@ -191,9 +191,13 @@ def _object_id(session, P, obj) -> Optional[bytes]:
     return bytes(value) if value else None
 
 
-def select_key_and_cert(session, P):
+def select_key_and_cert(session, P, preferred_id: Optional[bytes] = None):
     """
     Pick the private key and THE certificate that belongs to it.
+
+    ``preferred_id`` (a profile's cert_id from the config) selects the pair by
+    CKA_ID explicitly; a token without that key or certificate is an error,
+    not a silent fallback to another pair.
 
     PKCS#11 links a key to its certificate through an equal CKA_ID. Taking
     keys[0] and certs[0] independently — as both signers used to — breaks on
@@ -216,6 +220,13 @@ def select_key_and_cert(session, P):
         cid = _object_id(session, P, cert)
         if cid is not None:
             cert_by_id.setdefault(cid, cert)
+    if preferred_id is not None:
+        key = next((k for k in keys if _object_id(session, P, k) == preferred_id), None)
+        if key is None:
+            raise RuntimeError(f"No private key with CKA_ID {preferred_id.hex()} on the token")
+        if preferred_id not in cert_by_id:
+            raise RuntimeError(f"No certificate with CKA_ID {preferred_id.hex()} on the token")
+        return key, cert_by_id[preferred_id]
     for key in keys:
         kid = _object_id(session, P, key)
         if kid is not None and kid in cert_by_id:
@@ -303,7 +314,8 @@ class PKCS11Signer:
         "./libs/Av337CryptokiD.dll",
     ]
 
-    def __init__(self, module_path: Optional[str] = None):
+    def __init__(self, module_path: Optional[str] = None,
+                 cert_id: Optional[str] = None, mechanism: Optional[int] = None):
         try:
             import PyKCS11
         except ImportError:
@@ -311,6 +323,10 @@ class PKCS11Signer:
                 "PyKCS11 не встановлено. Встанови: pip install PyKCS11"
             )
 
+        # CKA_ID (hex) of the pair to use; None = pair by CKA_ID automatically.
+        self._cert_id = bytes.fromhex(cert_id) if cert_id else None
+        # Mechanism pinned by the profile; None = discover from the token.
+        self._pinned_mechanism = mechanism
         self._pkcs11 = PyKCS11.PyKCS11Lib()
         self._PyKCS11 = PyKCS11
         self._session = None
@@ -454,11 +470,11 @@ class PKCS11Signer:
         slot = resolve_slot(self._pkcs11, slot, "token connected")
         session = open_logged_in_session(self._pkcs11, self._PyKCS11, slot, pin)
         try:
-            key, cert = select_key_and_cert(session, self._PyKCS11)
+            key, cert = select_key_and_cert(session, self._PyKCS11, self._cert_id)
             if key is None:
                 raise RuntimeError("No private keys on token")
-            mech = self._sign_mechanism
-            if mech is None or slot != self._slot:
+            mech = self._pinned_mechanism or self._sign_mechanism
+            if mech is None or (self._pinned_mechanism is None and slot != self._slot):
                 mech = self.find_sign_mechanism(slot=slot)
         except Exception:
             close_session(session)

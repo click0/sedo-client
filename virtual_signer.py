@@ -51,13 +51,19 @@ class VirtualSigner:
     ]
 
     def __init__(self, module_path: Optional[str] = None,
-                 key_file: Optional[str] = None):
+                 key_file: Optional[str] = None, cert_id: Optional[str] = None,
+                 mechanism: Optional[int] = None):
         try:
             import PyKCS11
         except ImportError:
             raise VirtualTokenNotAvailable(
                 "PyKCS11 not installed. Install: pip install PyKCS11"
             )
+
+        # CKA_ID (hex) of the pair to use; None = pair by CKA_ID automatically.
+        self._cert_id = bytes.fromhex(cert_id) if cert_id else None
+        # Mechanism pinned by the profile; None = discover from the token.
+        self._pinned_mechanism = mechanism
 
         self._pkcs11 = PyKCS11.PyKCS11Lib()
         self._PyKCS11 = PyKCS11
@@ -167,11 +173,11 @@ class VirtualSigner:
         slot = resolve_slot(self._pkcs11, slot, "virtual token slot available")
         session = open_logged_in_session(self._pkcs11, self._PyKCS11, slot, pin)
         try:
-            key, cert = select_key_and_cert(session, self._PyKCS11)
+            key, cert = select_key_and_cert(session, self._PyKCS11, self._cert_id)
             if key is None:
                 raise RuntimeError("No private keys in virtual token")
-            mech = self._sign_mechanism
-            if mech is None or slot != self._slot:
+            mech = self._pinned_mechanism or self._sign_mechanism
+            if mech is None or (self._pinned_mechanism is None and slot != self._slot):
                 mech = self._find_sign_mechanism(slot=slot)
         except Exception:
             close_session(session)

@@ -9,6 +9,38 @@ License:  BSD 3-Clause "New" or "Revised" License
 
 ## v0.32 — unreleased
 
+### Додано
+
+- **Конфігурація `config.toml` + `config_local.toml`** (`sedo_config.py`).
+  Базовий файл у репозиторії без секретів і машинних шляхів, локальний — у
+  `.gitignore`, свій на кожну машину. Порядок: `config.toml` →
+  `config_local.toml` → `SEDO_*` → CLI; злиття по ключах. `--config` /
+  `SEDO_CONFIG` вказує на інший локальний файл, `--show-config` друкує
+  результат злиття з прихованими PIN. Невідомі ключі, неправильні значення й
+  `pin` у базовому файлі — помилка з назвою файлу і ключа.
+- **Профілі ключів і ролі.** `[keys.<name>]` описує ключ (backend, module,
+  `cert_id`, slot, mechanism, cert_index для агента, джерело PIN), `[roles]` —
+  який профіль входить у СЕДО (`auth`), який підписує документи (`sign`).
+  `SEDOClient` тримає signer на кожну роль (`signers[role]`), спільний
+  профіль — спільна сесія; `login(role, pin)`, `sign_document()`, `close()`
+  закриває всі. Без конфігу — поведінка як раніше, `client.signer` лишився.
+  Профілі можуть обирати пару за `cert_id` і в PyKCS11-бекендах (явний id —
+  без мовчазного відкату на іншу пару) і фіксувати механізм.
+- **PIN на профіль:** `--pin` → `pin` у локальному файлі (з попередженням) →
+  `SEDO_PIN_<NAME>` → `SEDO_PIN` (лише для ключа входу або спільного ключа —
+  PIN одного токена не йде на інший) → `pin_file` → запит. Порожній PIN, як і
+  раніше, зупиняє роботу до звернення до токена.
+- **`--sign-file FILE [--signature-out]`** — підписати файл профілем `sign`
+  без входу в СЕДО: перевірка ключа для документів, поки їх підпис у СЕДО не
+  реалізований (потрібен Fiddler). `--output`/`--since` беруть типові значення
+  з `[sedo]`.
+- Ansible: `sedo_keys` / `sedo_roles` в inventory → `config_local.toml` на
+  воркері (`win_template`), `sedo_key_pins` у vault → `SEDO_PIN_<PROFILE>`.
+  Без `sedo_keys` playbook працює як раніше.
+- Тести: `tests/test_config.py` (56) і два інтеграційні на SoftHSM — вхід
+  ключем з CKA_ID 01 і підпис ключем 02 на одному токені, підписи перевірені
+  `openssl` проти відповідних відкритих ключів; `--sign-file` через CLI.
+
 ### CI
 
 - **Тести ганяються на Windows на кожен PR** (job `windows`, Python 3.12).

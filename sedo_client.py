@@ -87,7 +87,9 @@ def _verify_accepted(r) -> bool:
 
 # Re-exported for backwards compatibility; the implementation lives in
 # _console.py and is shared by every CLI entry point.
-from _console import force_utf8_io, module_from_env, read_pin  # noqa: E402
+from _console import force_utf8_io, module_from_env  # noqa: E402
+from sedo_config import (Config, ConfigError, KeyProfile, ROLES, load_config,  # noqa: E402
+                         redacted, resolve_profile_pin)
 
 
 __all__ = ["SEDOClient", "Signer", "SEDO_MOD_URL", "IITAgentAdapter",
@@ -140,9 +142,43 @@ class SEDOClient:
     def __init__(self, sedo_url: str = SEDO_MOD_URL,
                  backend: str = "auto",
                  module_path: Optional[str] = None,
-                 key_file: Optional[str] = None):
+                 key_file: Optional[str] = None,
+                 config: Optional[Config] = None):
+        """
+        Without ``config`` (library callers, old CLI): one key, described by
+        backend/module_path/key_file, used for every role — exactly the
+        behaviour before profiles existed.
+
+        With ``config`` (config.toml + config_local.toml): one signer per
+        distinct profile, ``self.signers[role]`` per role. The explicit
+        backend/module_path/key_file arguments then override the ``auth``
+        profile — that is how --backend/--module/--key-file keep working.
+        """
         self.sedo_url = sedo_url.rstrip("/")
-        self.signer: Signer = self._pick_backend(backend, module_path, key_file)
+        self.config = config
+        self.profiles: dict = {}          # role → KeyProfile (None without config)
+        self.signers: dict = {}           # role → Signer
+        if config is None:
+            signer = self._pick_backend(backend, module_path, key_file)
+            self.signers = {role: signer for role in ROLES}
+            self.profiles = {role: None for role in ROLES}
+        else:
+            auth = config.profile("auth")
+            if backend != "auto":
+                auth.backend = backend
+            if module_path:
+                auth.module = module_path
+            if key_file:
+                auth.key_file = key_file
+            built: dict = {}
+            for profile in config.distinct_profiles():
+                built[profile.name] = self._build_signer(profile)
+            for role in ROLES:
+                profile = config.profile(role)
+                self.profiles[role] = profile
+                self.signers[role] = built[profile.name]
+        # The login key — kept as the plain attribute every caller used so far.
+        self.signer: Signer = self.signers["auth"]
 
         self.session = requests.Session()
         self.session.headers.update({
@@ -150,8 +186,21 @@ class SEDOClient:
             "Accept-Language": "uk,en;q=0.5",
         })
 
+    def _build_signer(self, profile: KeyProfile) -> Signer:
+        """Signer for one profile; the profile's extras ride along as keywords."""
+        extras = {k: v for k, v in (("cert_id", profile.cert_id),
+                                    ("mechanism", profile.mechanism),
+                                    ("cert_index", profile.cert_index)) if v is not None}
+        if extras:
+            return self._pick_backend(profile.backend, profile.module, profile.key_file,
+                                      **extras)
+        return self._pick_backend(profile.backend, profile.module, profile.key_file)
+
     def _pick_backend(self, name: str, module_path: Optional[str],
-                      key_file: Optional[str] = None) -> Signer:
+                      key_file: Optional[str] = None, *,
+                      cert_id: Optional[str] = None,
+                      mechanism: Optional[str] = None,
+                      cert_index: Optional[int] = None) -> Signer:
         """
         Вибирає backend:
         - 'opensc'    — OpenSC pkcs11-tool.exe (найпростіший, рекомендовано)
@@ -178,8 +227,12 @@ class SEDOClient:
                 # why: Av337CryptokiD.dll exposes the IIT ids 0x80420031/32,
                 # not the 0x352 the name-based table assumed.
                 mech = f"0x{detect_dstu4145_mechanism(module_path):08X}"
-                signer = OpenSCSigner(module_path=module_path, mechanism=mech)
-                mech = self._discover_opensc_mechanism(signer, module_path, mech)
+                signer = OpenSCSigner(module_path=module_path, mechanism=mech,
+                                      cert_id=cert_id)
+                if mechanism:          # pinned in the profile: no discovery
+                    mech = mechanism
+                else:
+                    mech = self._discover_opensc_mechanism(signer, module_path, mech)
                 signer.set_mechanism(mech)
                 log.info("Backend: OpenSC pkcs11-tool (subprocess), mechanism %s",
                          mech)
@@ -192,7 +245,8 @@ class SEDOClient:
         if name in ("pkcs11", "auto"):
             try:
                 from pkcs11_signer import PKCS11Signer
-                signer = PKCS11Signer(module_path)
+                signer = PKCS11Signer(module_path, cert_id=cert_id,
+                                      mechanism=int(mechanism, 16) if mechanism else None)
                 log.info("Backend: PKCS#11 (PyKCS11 direct)")
                 return signer
             except Exception as e:
@@ -210,7 +264,8 @@ class SEDOClient:
                         "in a standard location"
                     )
                 signer = VirtualSigner(module_path=module_path,
-                                       key_file=resolved_key)
+                                       key_file=resolved_key, cert_id=cert_id,
+                                       mechanism=int(mechanism, 16) if mechanism else None)
                 log.info("Backend: Virtual token (Key-6.dat, no USB)")
                 return signer
             except Exception as e:
@@ -223,7 +278,7 @@ class SEDOClient:
         try:
             client = IITClient.auto_discover(origin=self.sedo_url)
             log.info("Backend: IIT Agent JSON-RPC (%s:%d)", client.host, client.port)
-            return IITAgentAdapter(client)
+            return IITAgentAdapter(client, cert_index=cert_index or 0)
         except IITAgentNotFound as e:
             raise RuntimeError(f"No working backend: {e}")
 
@@ -264,6 +319,31 @@ class SEDOClient:
                 return str(p)
         return None
 
+    # ─── Ключі за ролями ─────────────────────────────────────
+
+    def login(self, role: str, pin: str) -> None:
+        """C_Login for the profile that holds ``role`` (auth / sign)."""
+        signer = self.signers[role]
+        profile = self.profiles.get(role)
+        name = profile.name if profile else "default"
+        log.info("Logging in to token (%s key, profile %s)...", role, name)
+        if profile is not None and profile.slot is not None:
+            signer.login(pin, slot=profile.slot)      # PyKCS11 backends only
+        else:
+            signer.login(pin)
+
+    def sign_document(self, data: bytes) -> bytes:
+        """
+        Sign with the ``sign`` profile (the document key, as opposed to the
+        login key). Requires ``login("sign", pin)`` first unless both roles
+        share one profile and authorize() already logged in.
+
+        SEDO's own document-signing endpoints are not implemented yet (they
+        need a Fiddler capture); this is the primitive they will use, and what
+        `--sign-file` exercises today.
+        """
+        return self.signers["sign"].sign(data)
+
     # ─── Авторизація ─────────────────────────────────────────
 
     def authorize(self, pin: str) -> None:
@@ -276,8 +356,7 @@ class SEDOClient:
         Точні URL-endpoints СЕДО ЗСУ уточнюються Fiddler-ом (30 хв роботи).
         Поки що — 3 можливі flow.
         """
-        log.info("Logging in to token...")
-        self.signer.login(pin)
+        self.login("auth", pin)
 
         cert = self.signer.get_certificate()
         log.info("Got certificate: %d bytes", len(cert))
@@ -426,16 +505,25 @@ class SEDOClient:
         return self
 
     def close(self) -> None:
-        """Log out, release the backend (DLL / agent connection), close HTTP."""
-        try:
+        """Log out, release every backend (DLL / agent connection), close HTTP."""
+        distinct = []
+        for signer in self.signers.values():
+            if all(signer is not s for s in distinct):
+                distinct.append(signer)
+        first_error = None
+        for signer in distinct:
             try:
-                self.signer.logout()
-            finally:
-                close = getattr(self.signer, "close", None)
-                if callable(close):
-                    close()
-        finally:
-            self.session.close()
+                try:
+                    signer.logout()
+                finally:
+                    close = getattr(signer, "close", None)
+                    if callable(close):
+                        close()
+            except Exception as e:  # keep closing the rest, re-raise the first
+                first_error = first_error or e
+        self.session.close()
+        if first_error is not None:
+            raise first_error
 
     def __exit__(self, *args):
         # Close the HTTP session even if logout() raises, to avoid leaks.
@@ -448,10 +536,13 @@ class IITAgentAdapter:
     # Agent "Sign" = CAdES-BES CMS SignedData, not a raw C_Sign value.
     signature_format = "cms"
 
-    def __init__(self, client):
+    def __init__(self, client, cert_index: int = 0):
         self._c = client
         self._cert_bytes = None
         self._device = None
+        # The agent has no CKA_ID: a profile picks the certificate by its
+        # index in EnumOwnCertificates (cert_index in the config).
+        self._cert_index = cert_index
 
     def login(self, pin: str):
         self._c.initialize()
@@ -463,7 +554,10 @@ class IITAgentAdapter:
         certs = self._c.enum_own_certificates()
         if not certs:
             raise RuntimeError("No certificates bound to private key")
-        cert_info = self._c.get_own_certificate(0)
+        if self._cert_index >= len(certs):
+            raise RuntimeError(f"cert_index {self._cert_index} out of range: the key "
+                               f"has {len(certs)} certificate(s)")
+        cert_info = self._c.get_own_certificate(self._cert_index)
         # get_own_certificate повертає DER у полі 'data' (hex) — див. docs/PROTOCOL-JSON-RPC.md
         # Guard the envelope: None/str would raise TypeError on `in`/subscript.
         if not isinstance(cert_info, dict):
@@ -538,9 +632,19 @@ def _build_parser():
     parser.add_argument("--pin",
                         help="Token PIN. Visible in the process list — prefer "
                              "the SEDO_PIN environment variable or the prompt.")
+    parser.add_argument("--config", help="config_local.toml to use instead of the one next "
+                                             "to the client (or $SEDO_CONFIG)")
+    parser.add_argument("--show-config", action="store_true",
+                        help="Print the merged configuration (PINs redacted) and exit")
+    parser.add_argument("--sign-file", metavar="FILE",
+                        help="Sign FILE with the 'sign' profile and exit (checks the "
+                             "document key without touching SEDO)")
+    parser.add_argument("--signature-out", metavar="PATH",
+                        help="Where to write the signature (default: FILE.sig)")
     parser.add_argument("--fetch", action="store_true")
     parser.add_argument("--since", help="Fetch docs since YYYY-MM-DD")
-    parser.add_argument("--output", default="./downloads")
+    parser.add_argument("--output", default=None,
+                        help="Download directory (default: [sedo].output or ./downloads)")
     parser.add_argument("-v", "--verbose", action="store_true")
     return parser
 
@@ -555,22 +659,56 @@ def main():
         format="%(asctime)s %(levelname)s %(message)s",
     )
 
-    # PIN precedence: --pin (argv, least safe) → SEDO_PIN env → interactive
-    # prompt. An empty PIN exits here instead of costing a token attempt.
-    args.pin = read_pin(args.pin)
+    try:
+        config = load_config(local_path=args.config)
+    except ConfigError as e:
+        log.error("❌ config: %s", e)
+        sys.exit(2)
+    if args.show_config:
+        import json
+        print(json.dumps(redacted(config), ensure_ascii=False, indent=2))
+        return
 
-    output_dir = Path(args.output)
+    auth_profile = config.profile("auth")
+    sign_profile = config.profile("sign")
+    same_key = auth_profile.name == sign_profile.name
+    url = args.url if args.url != SEDO_MOD_URL else config.sedo_url
+    output_dir = Path(args.output or config.output)
+    since = args.since or config.since
+
+    if args.sign_file:
+        # The document key alone: no SEDO, no auth login. The generic SEDO_PIN
+        # is the login key's PIN — it reaches this key only when it IS that key.
+        pin = resolve_profile_pin(sign_profile, args.pin, allow_generic_env=same_key)
+        try:
+            with SEDOClient(sedo_url=url, config=config) as sedo:
+                sedo.login("sign", pin)
+                data = Path(args.sign_file).read_bytes()
+                signature = sedo.sign_document(data)
+                out = Path(args.signature_out or args.sign_file + ".sig")
+                out.write_bytes(signature)
+                fmt = getattr(sedo.signers["sign"], "signature_format", "?")
+                print(f"✓ Signature: {out} ({len(signature)} bytes, {fmt}, "
+                      f"profile {sign_profile.name})")
+        except Exception as e:
+            log.error("❌ %s", e)
+            sys.exit(1)
+        return
+
+    # PIN precedence: --pin (argv, least safe) → $SEDO_PIN_<PROFILE> → SEDO_PIN
+    # → pin_file → prompt. An empty PIN exits here instead of costing an attempt.
+    args.pin = resolve_profile_pin(auth_profile, args.pin, allow_generic_env=True)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        with SEDOClient(sedo_url=args.url, backend=args.backend,
+        with SEDOClient(sedo_url=url, backend=args.backend,
                         module_path=module_from_env(args.module),
-                        key_file=args.key_file) as sedo:
+                        key_file=args.key_file, config=config) as sedo:
             sedo.authorize(args.pin)
             print("✓ Авторизація успішна")
 
             if args.fetch:
-                docs = sedo.fetch_inbox(since=args.since)
+                docs = sedo.fetch_inbox(since=since)
                 print(f"📄 Документів: {len(docs)}")
                 for doc in docs:
                     if not isinstance(doc, dict):

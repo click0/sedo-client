@@ -227,6 +227,31 @@ sedo-client/
   internally, where it is visible to other local users via the process list;
   on multi-user Windows workers prefer `backend=iit_agent`
 
+## Configuration: `config.toml` + `config_local.toml`
+
+Two files next to the client (the repository root / the `.exe` directory):
+
+| File | In git | Holds |
+|---|---|---|
+| `config.toml` | yes | SEDO URL, download dir, roles, profile defaults — no secrets, no machine paths; every key is documented in comments |
+| `config_local.toml` | no (`.gitignore`) | this machine: DLL paths, which token for which role, where the PIN comes from. Start from `config_local.toml.example`; Ansible renders it from `sedo_keys` (`ansible/templates/config_local.toml.j2`) |
+
+Precedence: `config.toml` → `config_local.toml` → `SEDO_*` variables → CLI
+flags. Merging is per key, so the local file may set only `module` for a
+profile. `--config PATH` (or `SEDO_CONFIG`) points at another local file.
+`python sedo_client.py --show-config` prints the merged result with PINs redacted.
+
+**Key profiles and roles.** `[keys.<name>]` describes one key (backend, module,
+`cert_id`, slot, mechanism, PIN source); `[roles]` says which profile logs in
+to SEDO (`auth`) and which signs documents (`sign`). Both roles on one profile
+is the ordinary single-key setup — with no local file nothing changes. Two
+profiles on one token (two CKA_IDs) share a session; two tokens mean two
+sessions and two PINs. PINs are never stored: a profile reads
+`SEDO_PIN_<NAME>` (the `auth` key also accepts plain `SEDO_PIN`), a `pin_file`,
+or asks interactively. `--sign-file FILE` signs a file with the `sign` profile
+without touching SEDO — the way to check the document key today, since SEDO's
+own document-signing endpoints still need a Fiddler capture.
+
 ## Environment variables
 
 | Variable | Meaning |
@@ -234,6 +259,8 @@ sedo-client/
 | `SEDO_PIN` | Token PIN (instead of `--pin`, which is visible in the process list) |
 | `SEDO_MODULE` | PKCS#11 module path, same as `--module` (`--module` wins) |
 | `SEDO_MODULE_DIRS` | Extra directories for module auto-discovery, `;`-separated on Windows; searched before the built-in list for the known file names (`PKCS11.EKeyAlmaz1C.dll`, `Av337CryptokiD.dll`, …) |
+| `SEDO_PIN_<PROFILE>` | PIN of one key profile (`[keys.<profile>]`), e.g. `SEDO_PIN_DOC` |
+| `SEDO_CONFIG` | Path of the local config file, same as `--config` |
 
 ```powershell
 $env:SEDO_MODULE_DIRS = "C:\Program Files (x86)\Institute of Informational Technologies\Certificate Authority-1.3\End User"

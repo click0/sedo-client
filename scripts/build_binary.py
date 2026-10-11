@@ -18,6 +18,7 @@ import sys
 # find_sign_mechanism — invisible to PyInstaller static analysis.
 HIDDEN_MODULES = [
     "_console",
+    "sedo_config",
     "opensc_signer",
     "pkcs11_signer",
     "virtual_signer",

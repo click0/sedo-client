@@ -21,6 +21,8 @@
   ],
   "words": [
     "almaz",
+    "toml",
+    "tomllib",
     "ansible",
     "avcryptoki",
     "brepro",

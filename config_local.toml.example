@@ -1,0 +1,29 @@
+# Зразок config_local.toml — скопіювати в config_local.toml поруч із клієнтом
+# і підправити шляхи. Файл config_local.toml у .gitignore. Ansible генерує його
+# з шаблону ansible/templates/config_local.toml.j2 і Vault.
+#
+# Приклад: вхід у СЕДО — ключ ІІТ Алмаз-1К через OpenSC, підпис документів —
+# ключ «Автор» ST-338 через PyKCS11. Два токени, два PIN, дві сесії.
+
+[keys.login]
+backend = "opensc"
+module = 'C:\Program Files (x86)\Institute of Informational Technologies\EKeys\Almaz1C\PKCS11.EKeyAlmaz1C.dll'
+# cert_id = "01"                       # на Алмаз-1К пара "01"; без рядка — автовибір
+pin_env = "SEDO_PIN_LOGIN"             # це й так типове значення для профілю "login"
+
+[keys.sign]
+backend = "pkcs11"
+module = 'C:\Program Files (x86)\Institute of Informational Technologies\Certificate Authority-1.3\End User\Av337CryptokiD.dll'
+cert_id = "02"                         # ID: з  pkcs11-tool --module ... --login --list-objects
+# slot = 0
+pin_env = "SEDO_PIN_SIGN"
+
+[roles]
+auth = "login"
+sign = "sign"
+
+# Той самий ключ на обидві ролі — лишіть один профіль, [roles] можна не писати:
+#
+# [keys.almaz]
+# backend = "opensc"
+# module = 'C:\...\PKCS11.EKeyAlmaz1C.dll'
