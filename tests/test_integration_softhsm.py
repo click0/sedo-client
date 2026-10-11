@@ -398,3 +398,55 @@ class TestEndToEnd:
             with pytest.raises(RuntimeError, match="All auth flows failed"):
                 c.authorize(PIN)
         assert srv.accepted is False
+
+
+# ═══ 4. Two profiles on one token: login key 01, document key 02 ══════════
+
+class TestProfiles:
+    def test_auth_and_sign_use_different_pairs(self, token, tmp_path, sedo):
+        """
+        config.toml / config_local.toml with two profiles on the same SoftHSM
+        token: `login` (cert 01, opensc) authorizes against the stand-in,
+        `doc` (cert 02, pkcs11) signs the document — and each signature
+        verifies only with its own public key.
+        """
+        import sedo_config as sc
+        from sedo_client import SEDOClient
+        (tmp_path / "config.toml").write_text(
+            "[keys.login]\nbackend = 'opensc'\ncert_id = '01'\nmechanism = '0x1041'\n"
+            "[keys.doc]\nbackend = 'pkcs11'\ncert_id = '02'\nmechanism = '0x1041'\n"
+            "[roles]\nauth = 'login'\nsign = 'doc'\n", encoding="utf-8")
+        (tmp_path / "config_local.toml").write_text(
+            f"[keys.login]\nmodule = '{token.module}'\n[keys.doc]\nmodule = '{token.module}'\n",
+            encoding="utf-8")
+        cfg = sc.load_config(client_dir=tmp_path, env={})
+        srv = sedo("01")
+        with SEDOClient(sedo_url=srv.url, config=cfg) as c:
+            c.signers["auth"].set_mechanism("ECDSA")   # pkcs11-tool wants the name
+            c.authorize(PIN)                            # login key, cert 01
+            c.login("sign", PIN)                        # document key, cert 02
+            assert c.signers["sign"].get_certificate() == token.cert["02"]
+            sig = c.sign_document(DIGEST)
+        assert srv.accepted is True
+        assert _verify(token.pub["02"], DIGEST, sig, tmp_path)
+        assert not _verify(token.pub["01"], DIGEST, sig, tmp_path)
+
+    def test_cli_sign_file_with_the_document_profile(self, token, tmp_path):
+        # The CLI reads the repository's config.toml plus THIS file via --config,
+        # so the whole two-profile setup lives in the local file.
+        local = tmp_path / "local.toml"
+        local.write_text(
+            f"[keys.login]\nbackend = 'opensc'\ncert_id = '01'\nmodule = '{token.module}'\n"
+            f"[keys.doc]\nbackend = 'pkcs11'\ncert_id = '02'\nmechanism = '0x1041'\n"
+            f"module = '{token.module}'\n"
+            "[roles]\nauth = 'login'\nsign = 'doc'\n", encoding="utf-8")
+        doc = tmp_path / "doc.bin"
+        doc.write_bytes(DIGEST)
+        env = dict(os.environ, SEDO_PIN_DOC=PIN, PYTHONIOENCODING="utf-8")
+        env.pop("SEDO_PIN", None)
+        r = subprocess.run([sys.executable, str(ROOT / "sedo_client.py"), "--config", str(local),
+                            "--sign-file", str(doc)],
+                           capture_output=True, text=True, env=env, cwd=tmp_path)
+        assert r.returncode == 0, r.stderr
+        assert "profile doc" in r.stdout
+        assert _verify(token.pub["02"], DIGEST, (tmp_path / "doc.bin.sig").read_bytes(), tmp_path)

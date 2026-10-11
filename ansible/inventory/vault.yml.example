@@ -7,6 +7,14 @@
 almaz_pins:
   ws01: "ENTER_PIN_HERE"
 
+# PINs per key PROFILE when a worker uses config_local.toml with several keys
+# (sedo_keys in hosts.yml). Becomes SEDO_PIN_<PROFILE> on the worker; the
+# login key may keep using almaz_pins / SEDO_PIN.
+# sedo_key_pins:
+#   ws01:
+#     login: "ENTER_PIN_HERE"
+#     doc: "ENTER_PIN_HERE"
+
 # PINs for Linux workers with virtual tokens (Key-6.dat files)
 virtual_pins:
   lin01: "ENTER_PIN_HERE"

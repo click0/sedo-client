@@ -85,6 +85,26 @@
         path: "{{ output_dir }}"
         state: directory
 
+    # Профілі ключів (вхід одним ключем, підпис іншим) — через config_local.toml
+    # поруч із клієнтом. Генерується з sedo_keys / sedo_roles в inventory;
+    # PIN-и профілів — з vault (sedo_key_pins) у змінні SEDO_PIN_<PROFILE>.
+    # Без sedo_keys нічого не змінюється: один ключ, SEDO_PIN, як і раніше.
+    - name: Розкласти config_local.toml з профілями ключів
+      ansible.windows.win_template:
+        src: ../templates/config_local.toml.j2
+        dest: "{{ client_path }}\\config_local.toml"
+      when: sedo_keys is defined
+
+    - name: Зібрати змінні оточення з PIN-ами профілів
+      ansible.builtin.set_fact:
+        sedo_pin_env: >-
+          {{ sedo_pin_env | default({})
+             | combine({'SEDO_PIN_' ~ (item.key | upper | regex_replace('[^A-Z0-9]+', '_')): item.value}) }}
+      loop: "{{ (sedo_key_pins[inventory_hostname] | default({})) | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      no_log: true
+
     - name: Запуск клієнта з PKCS#11 backend
       ansible.windows.win_command:
         cmd: >
@@ -95,8 +115,8 @@
           --fetch
           --since "{{ date_today }}"
           --output "{{ output_dir }}"
-      environment:
-        SEDO_PIN: "{{ almaz_pins[inventory_hostname] }}"
+      environment: >-
+        {{ {'SEDO_PIN': almaz_pins[inventory_hostname]} | combine(sedo_pin_env | default({})) }}
       no_log: true
       register: sedo_result
       failed_when: false
