@@ -143,7 +143,8 @@ class SEDOClient:
                  backend: str = "auto",
                  module_path: Optional[str] = None,
                  key_file: Optional[str] = None,
-                 config: Optional[Config] = None):
+                 config: Optional[Config] = None,
+                 roles: Optional[tuple] = None):
         """
         Without ``config`` (library callers, old CLI): one key, described by
         backend/module_path/key_file, used for every role — exactly the
@@ -153,6 +154,8 @@ class SEDOClient:
         distinct profile, ``self.signers[role]`` per role. The explicit
         backend/module_path/key_file arguments then override the ``auth``
         profile — that is how --backend/--module/--key-file keep working.
+        ``roles`` limits which profiles are built (``("sign",)`` for
+        --sign-file: the login key's module need not even be present).
         """
         self.sedo_url = sedo_url.rstrip("/")
         self.config = config
@@ -170,15 +173,17 @@ class SEDOClient:
                 auth.module = module_path
             if key_file:
                 auth.key_file = key_file
+            wanted = tuple(roles) if roles else ROLES
             built: dict = {}
-            for profile in config.distinct_profiles():
-                built[profile.name] = self._build_signer(profile)
-            for role in ROLES:
+            for role in wanted:
                 profile = config.profile(role)
+                if profile.name not in built:
+                    built[profile.name] = self._build_signer(profile)
                 self.profiles[role] = profile
                 self.signers[role] = built[profile.name]
-        # The login key — kept as the plain attribute every caller used so far.
-        self.signer: Signer = self.signers["auth"]
+        # The login key — kept as the plain attribute every caller used so far
+        # (None when the auth role was not requested).
+        self.signer: Signer = self.signers.get("auth")
 
         self.session = requests.Session()
         self.session.headers.update({
@@ -636,6 +641,9 @@ def _build_parser():
                                              "to the client (or $SEDO_CONFIG)")
     parser.add_argument("--show-config", action="store_true",
                         help="Print the merged configuration (PINs redacted) and exit")
+    parser.add_argument("--check", action="store_true",
+                        help="Check every key profile against this machine without a PIN "
+                             "(module, bitness, pkcs11-tool, token, mechanism, CKA_IDs) and exit")
     parser.add_argument("--sign-file", metavar="FILE",
                         help="Sign FILE with the 'sign' profile and exit (checks the "
                              "document key without touching SEDO)")
@@ -668,6 +676,13 @@ def main():
         import json
         print(json.dumps(redacted(config), ensure_ascii=False, indent=2))
         return
+    if args.check:
+        from sedo_check import run_checks
+        if not args.verbose:          # the report is the output; keep INFO noise out
+            logging.getLogger().setLevel(logging.WARNING)
+        report = run_checks(config)
+        print(report.render())
+        sys.exit(0 if report.ok else 1)
 
     auth_profile = config.profile("auth")
     sign_profile = config.profile("sign")
@@ -681,7 +696,7 @@ def main():
         # is the login key's PIN — it reaches this key only when it IS that key.
         pin = resolve_profile_pin(sign_profile, args.pin, allow_generic_env=same_key)
         try:
-            with SEDOClient(sedo_url=url, config=config) as sedo:
+            with SEDOClient(sedo_url=url, config=config, roles=("sign",)) as sedo:
                 sedo.login("sign", pin)
                 data = Path(args.sign_file).read_bytes()
                 signature = sedo.sign_document(data)

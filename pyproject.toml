@@ -41,6 +41,7 @@ addopts = "-v --tb=short"
 py-modules = [
     "_console",
     "sedo_config",
+    "sedo_check",
     "sedo_client",
     "iit_client",
     "opensc_signer",

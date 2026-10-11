@@ -34,9 +34,17 @@ License:  BSD 3-Clause "New" or "Revised" License
   без входу в СЕДО: перевірка ключа для документів, поки їх підпис у СЕДО не
   реалізований (потрібен Fiddler). `--output`/`--since` беруть типові значення
   з `[sedo]`.
+- **`--check`** (`sedo_check.py`) — перевірка кожного профілю на цій машині
+  **без PIN**: модуль і його бітність, `pkcs11-tool` тієї ж бітності, токен,
+  обраний механізм підпису, сертифікати (CKA_ID) на токені та чи є серед них
+  `cert_id`, звідки візьметься PIN. Жодного `C_Login`, тож жодна з 15 спроб
+  Алмаз-1К не витрачається; код виходу 1 при ✗. Замінює ручний прогін команд на
+  машині з токеном. Перевірено на SoftHSM у CI.
+- `SEDOClient(..., roles=("sign",))` будує лише потрібні профілі; `--sign-file`
+  більше не потребує модуля ключа входу.
 - Ansible: `sedo_keys` / `sedo_roles` в inventory → `config_local.toml` на
-  воркері (`win_template`), `sedo_key_pins` у vault → `SEDO_PIN_<PROFILE>`.
-  Без `sedo_keys` playbook працює як раніше.
+  воркері (`win_template` на Windows, `template` на Linux/Wine), `sedo_key_pins`
+  у vault → `SEDO_PIN_<PROFILE>`. Без `sedo_keys` playbook-и працюють як раніше.
 - Тести: `tests/test_config.py` (56) і два інтеграційні на SoftHSM — вхід
   ключем з CKA_ID 01 і підпис ключем 02 на одному токені, підписи перевірені
   `openssl` проти відповідних відкритих ключів; `--sign-file` через CLI.

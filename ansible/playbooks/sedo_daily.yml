@@ -91,7 +91,7 @@
     # Без sedo_keys нічого не змінюється: один ключ, SEDO_PIN, як і раніше.
     - name: Розкласти config_local.toml з профілями ключів
       ansible.windows.win_template:
-        src: ../templates/config_local.toml.j2
+        src: config_local.toml.j2
         dest: "{{ client_path }}\\config_local.toml"
       when: sedo_keys is defined
 

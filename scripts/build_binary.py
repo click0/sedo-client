@@ -19,6 +19,7 @@ import sys
 HIDDEN_MODULES = [
     "_console",
     "sedo_config",
+    "sedo_check",
     "opensc_signer",
     "pkcs11_signer",
     "virtual_signer",
