@@ -450,3 +450,38 @@ class TestProfiles:
         assert r.returncode == 0, r.stderr
         assert "profile doc" in r.stdout
         assert _verify(token.pub["02"], DIGEST, (tmp_path / "doc.bin.sig").read_bytes(), tmp_path)
+
+
+# ═══ 5. --check: the PIN-less setup check on a real token ════════════════
+
+class TestCheck:
+    def _local(self, tmp_path, token, sign_cert="02"):
+        local = tmp_path / "local.toml"
+        local.write_text(
+            f"[keys.login]\nbackend = 'opensc'\nmodule = '{token.module}'\ncert_id = '01'\n"
+            f"mechanism = '0x1041'\n"                       # SoftHSM has no DSTU: pin ECDSA
+            f"[keys.doc]\nbackend = 'pkcs11'\nmodule = '{token.module}'\ncert_id = '{sign_cert}'\n"
+            f"mechanism = '0x1041'\n"
+            "[roles]\nauth = 'login'\nsign = 'doc'\n", encoding="utf-8")
+        return local
+
+    def _run(self, tmp_path, local, **env_extra):
+        env = {k: v for k, v in os.environ.items() if not k.startswith("SEDO_PIN")}
+        env.update(PYTHONIOENCODING="utf-8", **env_extra)
+        return subprocess.run([sys.executable, str(ROOT / "sedo_client.py"),
+                               "--config", str(local), "--check"],
+                              capture_output=True, text=True, env=env, cwd=tmp_path)
+
+    def test_two_profiles_pass(self, token, tmp_path):
+        r = self._run(tmp_path, self._local(tmp_path, token), SEDO_PIN_LOGIN="x", SEDO_PIN_DOC="y")
+        assert r.returncode == 0, r.stdout + r.stderr
+        out = r.stdout
+        assert "cert_id 01 присутній" in out and "cert_id 02 присутній" in out
+        assert "0x1041" in out and "Результат: OK" in out
+        assert "INFO" not in out                           # report only, no log noise
+
+    def test_missing_cert_id_and_pin_are_reported(self, token, tmp_path):
+        r = self._run(tmp_path, self._local(tmp_path, token, sign_cert="09"))
+        assert r.returncode == 1
+        assert "cert_id 09 НЕМАЄ" in r.stdout
+        assert "буде інтерактивний запит" in r.stdout

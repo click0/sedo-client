@@ -1,6 +1,6 @@
 # Зразок config_local.toml — скопіювати в config_local.toml поруч із клієнтом
 # і підправити шляхи. Файл config_local.toml у .gitignore. Ansible генерує його
-# з шаблону ansible/templates/config_local.toml.j2 і Vault.
+# з шаблону ansible/playbooks/templates/config_local.toml.j2 і Vault.
 #
 # Приклад: вхід у СЕДО — ключ ІІТ Алмаз-1К через OpenSC, підпис документів —
 # ключ «Автор» ST-338 через PyKCS11. Два токени, два PIN, дві сесії.

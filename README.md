@@ -234,7 +234,7 @@ Two files next to the client (the repository root / the `.exe` directory):
 | File | In git | Holds |
 |---|---|---|
 | `config.toml` | yes | SEDO URL, download dir, roles, profile defaults — no secrets, no machine paths; every key is documented in comments |
-| `config_local.toml` | no (`.gitignore`) | this machine: DLL paths, which token for which role, where the PIN comes from. Start from `config_local.toml.example`; Ansible renders it from `sedo_keys` (`ansible/templates/config_local.toml.j2`) |
+| `config_local.toml` | no (`.gitignore`) | this machine: DLL paths, which token for which role, where the PIN comes from. Start from `config_local.toml.example`; Ansible renders it from `sedo_keys` (`ansible/playbooks/templates/config_local.toml.j2`) |
 
 Precedence: `config.toml` → `config_local.toml` → `SEDO_*` variables → CLI
 flags. Merging is per key, so the local file may set only `module` for a
@@ -251,6 +251,13 @@ sessions and two PINs. PINs are never stored: a profile reads
 or asks interactively. `--sign-file FILE` signs a file with the `sign` profile
 without touching SEDO — the way to check the document key today, since SEDO's
 own document-signing endpoints still need a Fiddler capture.
+
+**Checking a machine without spending a PIN attempt.** `python sedo_client.py --check`
+walks every profile: module present and its bitness, `pkcs11-tool` found and of the
+same bitness, token visible, which signing mechanism will be chosen, which
+certificates (CKA_IDs) the token exposes and whether `cert_id` is among them,
+where the PIN would come from. No `C_Login` anywhere; exit code 1 on any ✗.
+Paste its output when asking for help.
 
 ## Environment variables
 

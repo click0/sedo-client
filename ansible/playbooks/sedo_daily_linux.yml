@@ -121,6 +121,28 @@
         state: directory
         mode: '0750'
 
+    # Key profiles (login with one key, sign with another) via config_local.toml
+    # next to the client, rendered from sedo_keys / sedo_roles; profile PINs
+    # from the vault (sedo_key_pins) as SEDO_PIN_<PROFILE>. Without sedo_keys
+    # nothing changes: one key, SEDO_PIN, as before. Module paths inside the
+    # profiles must be Windows-form (the client runs under Wine).
+    - name: Render config_local.toml with key profiles
+      ansible.builtin.template:
+        src: config_local.toml.j2
+        dest: "{{ client_path }}/config_local.toml"
+        mode: '0640'
+      when: sedo_keys is defined
+
+    - name: Collect profile PINs as environment variables
+      ansible.builtin.set_fact:
+        sedo_pin_env: >-
+          {{ sedo_pin_env | default({})
+             | combine({'SEDO_PIN_' ~ (item.key | upper | regex_replace('[^A-Z0-9]+', '_')): item.value}) }}
+      loop: "{{ (sedo_key_pins[inventory_hostname] | default({})) | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      no_log: true
+
     # Windows-форми шляхів: аргументи читає Windows-Python усередині префіксу.
     - name: Run sedo-client with virtual backend
       ansible.builtin.command:
@@ -133,9 +155,9 @@
           --fetch
           --since "{{ date_today }}"
           --output "{{ output_dir_win }}"
-      environment:
-        WINEPREFIX: "{{ wine_prefix }}"
-        SEDO_PIN: "{{ virtual_pins[inventory_hostname] }}"
+      environment: >-
+        {{ {'WINEPREFIX': wine_prefix, 'SEDO_PIN': virtual_pins[inventory_hostname]}
+           | combine(sedo_pin_env | default({})) }}
       no_log: true
       register: sedo_result
       failed_when: false
