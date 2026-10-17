@@ -54,7 +54,7 @@ jobs:
              "dist/sedo-client-${{ steps.ver.outputs.version }}-linux-x86_64"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sedo-client-linux-x86_64
           path: dist/sedo-client-*-linux-x86_64
@@ -70,7 +70,7 @@ jobs:
       # tree (dist/sedo-client included) back after `run` — its default
       # (copyback: true). If that is ever disabled, the rename step fails.
       - name: Build in FreeBSD VM
-        uses: vmactions/freebsd-vm@a2f9a41fa97f6848b8c3b791087dfcdaa5b473ff # v1.5.8
+        uses: vmactions/freebsd-vm@c46abacb49f09938ca4e1702d15d836285d694cc # v1.5.9
         with:
           release: "14.1"
           usesh: true
@@ -102,7 +102,7 @@ jobs:
              "dist/sedo-client-${{ steps.ver.outputs.version }}-freebsd-amd64"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sedo-client-freebsd-amd64
           path: dist/sedo-client-*-freebsd-amd64
