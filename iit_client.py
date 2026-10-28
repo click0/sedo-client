@@ -12,9 +12,13 @@ Year:     2025-2026
 import base64
 import binascii
 import logging
+import os
 import re
+import ssl
 import sys
-from typing import Any, Optional
+from pathlib import Path
+from typing import Any, Optional, Union
+from urllib.parse import urlsplit
 
 import requests
 
@@ -23,7 +27,8 @@ log = logging.getLogger(__name__)
 __all__ = [
     "IITClient", "IITError", "IITRPCError", "IITAgentNotFound",
     "discover_agent", "verify_agent", "read_port_from_registry",
-    "read_trusted_sites", "read_eusigncp_config",
+    "read_trusted_sites", "read_eusigncp_config", "read_agent_autorun",
+    "agent_ca_files", "agent_ca_bundle", "origin_from_url",
 ]
 
 
@@ -53,6 +58,26 @@ EUSIGNCP_REGISTRY_PATH = (
 # Fallback — якщо реєстр недоступний, спробувати звичайні порти
 # 8081/8083 — підтверджені порти з реєстру (HTTPPort/HTTPSPort)
 FALLBACK_PORTS = [8081, 8083, 9100, 9101, 8080, 8443, 9000, 9090]
+
+# TLS on the HTTPS port (8083). The agent's leaf certificate is issued by a
+# per-machine self-signed "EU Sign Agent CA" (RSA 2048, generated at install
+# time, so its fingerprint differs on every PC and cannot be pinned here). The
+# agent's settings dialog ("Файл з SSL-сертифікатом") points at that CA under
+# %ProgramData%; the user can also name it explicitly.
+AGENT_CA_ENV = "SEDO_AGENT_CA"
+AGENT_CA_DIRS = [
+    r"%ProgramData%\Institute of Informational Technologies"
+    r"\Certificate Authority-1.3\End User\Sign Agent",
+    r"%ProgramData%\Institute of Informational Technologies"
+    r"\Certificate Authority-1.3\End User",
+]
+AGENT_CA_NAMES = ("EUSignAgentCA.pem", "EUSignAgentCA.cer",
+                  "EUSignAgent.pem", "EUSignAgent.cer")
+# Value names under Sign Agent\Common that may hold the SSL certificate path.
+# The exact name is not documented; these are tried in order and a hit must
+# point at an existing file.
+_REGISTRY_CA_VALUES = ("SSLCertPath", "SSLCertificatePath", "SSLCertificate",
+                       "SSLCert", "SSLCAPath", "CACertPath", "CertPath")
 
 # JSON-RPC methods whose params carry a PIN/password — never log their params.
 _REDACTED_METHODS = frozenset({
@@ -95,6 +120,60 @@ def _as_port(value) -> Optional[int]:
         log.warning("Ignoring out-of-range agent port in registry: %r", value)
         return None
     return port
+
+
+def _query_values(path: str, names: tuple) -> dict:
+    """
+    {name: value} for the named values under `path`, first hive that has any
+    of them (HKLM, then HKCU; 32-bit view). Empty off Windows or on any error.
+    """
+    if sys.platform != "win32":
+        return {}
+    try:
+        import winreg
+    except ImportError:
+        return {}
+    for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+        found = {}
+        try:
+            with winreg.OpenKey(hive, path, 0,
+                                winreg.KEY_READ | winreg.KEY_WOW64_32KEY) as key:
+                for name in names:
+                    try:
+                        found[name] = winreg.QueryValueEx(key, name)[0]
+                    except FileNotFoundError:
+                        pass
+        except FileNotFoundError:
+            continue
+        except OSError as e:
+            log.warning("Registry read failed: %s", e)
+            continue
+        if found:
+            return found
+    return {}
+
+
+def read_agent_autorun() -> Optional[bool]:
+    """
+    The agent's "Запускати процес автоматично" checkbox (AutoRun under
+    Sign Agent\\Common): True / False, or None when unknown (not Windows, no
+    value). With AutoRun = 0 the agent only runs while the user has started
+    «Користувач ЦСК» by hand, so an unattended run finds no agent at all.
+    """
+    raw = _query_values(REGISTRY_PATH, ("AutoRun",)).get("AutoRun")
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        text = raw.strip().lower()
+        if text in ("1", "true", "yes"):
+            return True
+        if text in ("0", "false", "no", ""):
+            return False
+        return None
+    try:
+        return bool(int(raw))
+    except (TypeError, ValueError):
+        return None
 
 
 def read_port_from_registry() -> tuple[Optional[int], Optional[int]]:
@@ -204,22 +283,152 @@ def read_eusigncp_config() -> dict:
     return config
 
 
+# ═══════════════════════════════════════════════════════════════
+# TLS до агента: CA з реєстру / %ProgramData% / $SEDO_AGENT_CA
+# ═══════════════════════════════════════════════════════════════
+
+def origin_from_url(url: str) -> str:
+    """
+    The `Origin` the agent compares against TrustedSites: scheme + host only.
+    `https://sedo.mod.gov.ua/` or `https://sedo.mod.gov.ua/some/path` from the
+    config would otherwise be sent as-is and fail the whitelist's exact match.
+    """
+    parts = urlsplit(url.strip())
+    if parts.scheme and parts.netloc:
+        return f"{parts.scheme}://{parts.netloc}"
+    return url.strip().rstrip("/")
+
+
+def agent_ca_files(env: Optional[dict] = None) -> list[Path]:
+    """
+    Candidate certificate files for verifying the agent's HTTPS port, in
+    order: $SEDO_AGENT_CA, the SSL-certificate path from the registry, the
+    known files under %ProgramData%. Only existing files are returned; a set
+    but missing $SEDO_AGENT_CA is a warning.
+    """
+    env = os.environ if env is None else env
+    seen: list[Path] = []
+
+    def _add(p) -> None:
+        try:
+            path = Path(os.path.expandvars(str(p))).expanduser()
+        except (TypeError, ValueError):
+            return
+        if path.is_file() and path not in seen:
+            seen.append(path)
+
+    explicit = (env.get(AGENT_CA_ENV) or "").strip()
+    if explicit:
+        _add(explicit)
+        if not seen:
+            log.warning("%s=%s does not exist — ignoring", AGENT_CA_ENV, explicit)
+    for value in _query_values(REGISTRY_PATH, _REGISTRY_CA_VALUES).values():
+        if isinstance(value, str) and value.strip():
+            _add(value.strip())
+    for d in AGENT_CA_DIRS:
+        for name in AGENT_CA_NAMES:
+            _add(os.path.join(d, name))
+    return seen
+
+
+def _as_pem(data: bytes) -> str:
+    """PEM text of one certificate file: PEM as-is, DER (.cer) converted."""
+    if b"-----BEGIN" in data:
+        return data.decode("utf-8", "replace").strip() + "\n"
+    return ssl.DER_cert_to_PEM_cert(data)
+
+
+def _bundle_dir(env: Optional[dict] = None) -> Path:
+    env = os.environ if env is None else env
+    base = env.get("LOCALAPPDATA") or env.get("XDG_CACHE_HOME")
+    root = Path(base) if base else Path.home() / ".cache"
+    return root / "sedo-client"
+
+
+def agent_ca_bundle(env: Optional[dict] = None) -> Optional[str]:
+    """
+    Path of a PEM bundle with every certificate from agent_ca_files(), or
+    None when there is none. requests takes a path, and the files on disk are
+    DER (.cer), so the bundle is (re)written under %LOCALAPPDATA%\\sedo-client
+    only when its content changes. Both the CA and the leaf go in: with the
+    leaf present the bundle also works should the agent ever serve a
+    self-signed certificate directly.
+    """
+    files = agent_ca_files(env)
+    if not files:
+        return None
+    parts = []
+    for f in files:
+        try:
+            pem = _as_pem(f.read_bytes())
+        except OSError as e:
+            log.warning("Cannot read agent certificate %s: %s", f, e)
+            continue
+        if pem not in parts:
+            parts.append(pem)
+    if not parts:
+        return None
+    content = "".join(parts)
+    target = _bundle_dir(env) / "agent-ca.pem"
+    try:
+        if target.is_file() and target.read_text(encoding="utf-8") == content:
+            return str(target)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_suffix(".pem.tmp")
+        tmp.write_text(content, encoding="utf-8")
+        os.replace(tmp, target)
+    except OSError as e:
+        log.warning("Cannot write agent CA bundle %s: %s — TLS stays unverified", target, e)
+        return None
+    log.debug("Agent CA bundle %s from %s", target, ", ".join(map(str, files)))
+    return str(target)
+
+
+def _tls_verify(host: str, use_https: bool) -> Union[bool, str]:
+    """
+    The `verify=` for requests. Plain HTTP and non-loopback HTTPS: True
+    (system trust). Loopback HTTPS: the agent's own CA bundle when one is
+    found, otherwise False (self-signed per-machine cert, nothing to verify
+    against) — which is what every version before 0.33 did unconditionally.
+    """
+    if not use_https or not _is_loopback(host):
+        return True
+    bundle = agent_ca_bundle()
+    if bundle:
+        return bundle
+    try:
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    except ImportError:
+        pass
+    return False
+
+
+def _request(method: str, url: str, verify: Union[bool, str], **kw):
+    """
+    requests.request with one retry without verification when the agent's
+    CA bundle does not fit its certificate (for example a leaf whose SAN says
+    `localhost` while we connect to 127.0.0.1). Only ever downgrades a
+    bundle, never True: a non-loopback host stays fully verified.
+    """
+    send = getattr(requests, method.lower())       # requests.options / requests.post
+    try:
+        return send(url, verify=verify, **kw)
+    except requests.exceptions.SSLError as e:
+        if not isinstance(verify, str):
+            raise
+        log.debug("TLS verification with %s failed (%s); retrying unverified", verify, e)
+        return send(url, verify=False, **kw)
+
+
 def probe_port(host: str = "127.0.0.1", port: int = 8081,
                timeout: float = 1.0, use_https: bool = False) -> bool:
     """Перевіряє чи відповідає сервер на порту."""
     scheme = "https" if use_https else "http"
     url = f"{scheme}://{host}:{port}/json-rpc"
-    # Skip TLS verification only for the self-signed agent cert on loopback.
-    skip_verify = use_https and _is_loopback(host)
     try:
-        if skip_verify:
-            try:
-                import urllib3
-                urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-            except ImportError:
-                pass
         # OPTIONS preflight — агент підтримує CORS
-        r = requests.options(url, timeout=timeout, verify=not skip_verify)
+        r = _request("OPTIONS", url, _tls_verify(host, use_https), timeout=timeout)
         return r.status_code in (200, 204, 405)
     except requests.exceptions.RequestException:
         return False
@@ -241,17 +450,10 @@ def verify_agent(host: str = "127.0.0.1", port: int = 8081,
     """
     scheme = "https" if use_https else "http"
     url = f"{scheme}://{host}:{port}/json-rpc"
-    skip_verify = use_https and _is_loopback(host)
     try:
-        if skip_verify:
-            try:
-                import urllib3
-                urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-            except ImportError:
-                pass
-        r = requests.post(url, json={"jsonrpc": "2.0", "id": 0,
-                                     "method": "GetVersion", "params": []},
-                          timeout=timeout, verify=not skip_verify)
+        r = _request("POST", url, _tls_verify(host, use_https),
+                     json={"jsonrpc": "2.0", "id": 0, "method": "GetVersion", "params": []},
+                     timeout=timeout)
         if r.status_code != 200:
             return False
         data = r.json()
@@ -417,27 +619,28 @@ class IITClient:
                  timeout: float = 30.0):
         self.host = host
         self.port = port
+        self.use_https = use_https
         scheme = "https" if use_https else "http"
         self.base_url = f"{scheme}://{host}:{port}/json-rpc"
-        self.origin = origin
+        # The agent matches Origin against TrustedSites exactly (scheme+host,
+        # no path, no trailing slash) — normalise whatever the config said.
+        self.origin = origin_from_url(origin)
         self.timeout = timeout
+        # Set when the agent's CA bundle did not fit its certificate and the
+        # session fell back to an unverified loopback connection (see call()).
+        self.tls_fallback: Optional[str] = None
 
         self.session = requests.Session()
         self.session.headers.update({
             "Content-Type": "application/json",
             "Accept": "application/json",
-            "Origin": origin,
+            "Origin": self.origin,
             "User-Agent": "sedo-automation/1.0",
         })
-        if use_https and _is_loopback(host):
-            # Self-signed agent cert on loopback only. For any non-loopback
-            # host (e.g. --host remote --https) TLS stays fully verified.
-            self.session.verify = False
-            try:
-                import urllib3
-                urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-            except ImportError:
-                pass
+        # Loopback HTTPS: the agent's own CA when found, else unverified (the
+        # cert is self-signed per machine). Any non-loopback host (e.g.
+        # --host remote --https) keeps full system verification.
+        self.session.verify = _tls_verify(host, use_https)
 
         self._rpc_id = 0
         self._session_id: Optional[str] = None
@@ -475,7 +678,20 @@ class IITClient:
         log.debug("→ %s(%s)", method,
                   "[***]" if method in _REDACTED_METHODS else params)
         try:
-            r = self.session.post(self.base_url, json=payload, timeout=self.timeout)
+            try:
+                r = self.session.post(self.base_url, json=payload, timeout=self.timeout)
+            except requests.exceptions.SSLError as e:
+                if not (isinstance(self.session.verify, str) and _is_loopback(self.host)):
+                    raise
+                # The bundle exists but the agent's leaf does not chain to it
+                # or its SAN does not cover the host we dial. Keep working
+                # the way 0.32 did (unverified on loopback) and say so once.
+                bundle, self.session.verify = self.session.verify, False
+                self.tls_fallback = str(e)
+                log.warning("TLS verification of the agent with %s failed (%s); "
+                            "continuing without certificate verification on loopback",
+                            bundle, e)
+                r = self.session.post(self.base_url, json=payload, timeout=self.timeout)
         except requests.exceptions.RequestException as e:
             raise IITAgentNotFound(f"Failed to reach agent: {e}") from e
 
@@ -704,6 +920,10 @@ def main():
         host, port, https = result
         print(f"✓ Found agent: {'https' if https else 'http'}://{host}:{port}")
         print(f"  Trusted sites: {read_trusted_sites()}")
+        autorun = read_agent_autorun()
+        print(f"  AutoRun: {'unknown' if autorun is None else int(autorun)}")
+        ca = agent_ca_files()
+        print(f"  TLS CA files: {', '.join(map(str, ca)) if ca else 'none'}")
         if not args.list_devices and not args.list_certs:
             return
         client = IITClient(host=host, port=port, use_https=https)

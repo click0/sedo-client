@@ -268,6 +268,7 @@ Paste its output when asking for help.
 | `SEDO_MODULE_DIRS` | Extra directories for module auto-discovery, `;`-separated on Windows; searched before the built-in list for the known file names (`PKCS11.EKeyAlmaz1C.dll`, `Av337CryptokiD.dll`, …) |
 | `SEDO_PIN_<PROFILE>` | PIN of one key profile (`[keys.<profile>]`), e.g. `SEDO_PIN_DOC` |
 | `SEDO_CONFIG` | Path of the local config file, same as `--config` |
+| `SEDO_AGENT_CA` | Certificate (PEM or DER `.cer`) that verifies the IIT agent's HTTPS port (8083). Without it the file named in the agent's registry key or `EUSignAgentCA.cer` under `%ProgramData%\…\End User\Sign Agent` is used; when none exists or it does not fit, the loopback connection stays unverified as before |
 
 ```powershell
 $env:SEDO_MODULE_DIRS = "C:\Program Files (x86)\Institute of Informational Technologies\Certificate Authority-1.3\End User"
