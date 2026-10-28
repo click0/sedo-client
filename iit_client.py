@@ -332,9 +332,13 @@ def agent_ca_files(env: Optional[dict] = None) -> list[Path]:
 
 
 def _as_pem(data: bytes) -> str:
-    """PEM text of one certificate file: PEM as-is, DER (.cer) converted."""
+    """
+    PEM text of one certificate file: PEM as-is (CRLF → LF, so a PEM saved
+    on Windows and its DER twin dedupe to one entry), DER (.cer) converted.
+    """
     if b"-----BEGIN" in data:
-        return data.decode("utf-8", "replace").strip() + "\n"
+        text = data.decode("utf-8", "replace").replace("\r\n", "\n").replace("\r", "\n")
+        return text.strip() + "\n"
     return ssl.DER_cert_to_PEM_cert(data)
 
 
