@@ -235,17 +235,39 @@ def _check_pykcs11(profile, module: str, rep: Report) -> None:
 
 
 def _check_agent(profile, sedo_url: str, rep: Report) -> None:
-    from iit_client import IITClient, IITError, discover_agent
+    from iit_client import (AGENT_CA_ENV, IITClient, IITError, discover_agent,
+                            origin_from_url, read_agent_autorun, read_trusted_sites)
+    autorun = read_agent_autorun()
+    if autorun is False:
+        rep.add(WARN, "автозапуск агента вимкнено (AutoRun = 0): після входу в Windows "
+                      "«Користувач ЦСК» треба запускати вручну; для безлюдних запусків "
+                      "увімкніть «Запускати процес автоматично» або беріть opensc/pkcs11")
     found = discover_agent()
     if not found:
         rep.add(FAIL, "агент ІІТ (EUSignAgent) не відповідає на жодному відомому порту — "
                       "запущений «Користувач ЦСК»?")
         return
     host, port, https = found
+    origin = origin_from_url(sedo_url)
+    trusted = read_trusted_sites()
+    if trusted and origin not in trusted:
+        rep.add(WARN, f"Origin {origin} немає серед довірених сайтів агента ({', '.join(trusted)}): "
+                      "додайте його в «Параметри роботи → Довірені web-сайти»")
+    elif origin != sedo_url.strip():
+        rep.add(OK, f"Origin {origin} (з url {sedo_url.strip()})")
     try:
         client = IITClient(host=host, port=port, use_https=https, origin=sedo_url)
         try:
             version = client.get_version()
+            if https:
+                if client.tls_fallback:
+                    rep.add(WARN, f"TLS: CA агента не підійшов до його сертифіката ({client.tls_fallback}); "
+                                  "з'єднання без перевірки сертифіката — надішліть цей рядок")
+                elif isinstance(client.session.verify, str):
+                    rep.add(OK, f"TLS перевірено за {client.session.verify}")
+                else:
+                    rep.add(WARN, "TLS без перевірки сертифіката: CA агента не знайдено "
+                                  f"(${AGENT_CA_ENV} або EUSignAgentCA.cer у %ProgramData%)")
         finally:
             client.close()
         rep.add(OK, f"агент: {'https' if https else 'http'}://{host}:{port}, версія {version}")

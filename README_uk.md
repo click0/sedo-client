@@ -267,6 +267,7 @@ PIN. PIN не зберігається: профіль читає `SEDO_PIN_<І�
 | `SEDO_MODULE_DIRS` | Додаткові каталоги для автопошуку модуля, на Windows через `;`; перевіряються перед вбудованим списком за відомими іменами файлів (`PKCS11.EKeyAlmaz1C.dll`, `Av337CryptokiD.dll`, …) |
 | `SEDO_PIN_<ПРОФІЛЬ>` | PIN одного профілю ключа (`[keys.<профіль>]`), напр. `SEDO_PIN_DOC` |
 | `SEDO_CONFIG` | Шлях до локального конфігу, те саме що `--config` |
+| `SEDO_AGENT_CA` | Сертифікат (PEM або DER `.cer`) для перевірки HTTPS-порту агента ІІТ (8083). Без нього береться файл з реєстру агента або `EUSignAgentCA.cer` з `%ProgramData%\…\End User\Sign Agent`; якщо нічого немає або сертифікат не підходить, з'єднання на loopback іде без перевірки, як раніше |
 
 ```powershell
 $env:SEDO_MODULE_DIRS = "C:\Program Files (x86)\Institute of Informational Technologies\Certificate Authority-1.3\End User"
