@@ -15,9 +15,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-import iit_client
-from iit_client import IITClient
-from sedo_client import SEDOClient, _safe_doc_id, _verify_accepted
+from sedo import iit_client
+from sedo.iit_client import IITClient
+from sedo.client import SEDOClient, _safe_doc_id, _verify_accepted
 
 
 class _Signer:
@@ -44,7 +44,7 @@ class _Signer:
 
 
 def _client(signer=None):
-    with patch("sedo_client.SEDOClient._pick_backend", return_value=signer or _Signer()):
+    with patch("sedo.client.SEDOClient._pick_backend", return_value=signer or _Signer()):
         c = SEDOClient()
     c.session = MagicMock()
     return c
@@ -130,7 +130,7 @@ class TestWindowsReservedIds:
 # ─── 4. D3: an unknown backend is an error, not the IIT agent ─
 
 def test_unknown_backend_raises_before_any_agent_call():
-    with patch("iit_client.IITClient.auto_discover") as disc:
+    with patch("sedo.iit_client.IITClient.auto_discover") as disc:
         with pytest.raises(ValueError, match="Unknown backend 'pkcs12'"):
             SEDOClient(backend="pkcs12")
     disc.assert_not_called()
@@ -174,30 +174,30 @@ Supported mechanisms:
 class TestRealPkcs11ToolOutput:
     def test_real_format_is_parsed(self):
         """The regression: the parser matched 'mechanism-0x', OpenSC prints 'mechtype-0x'."""
-        from opensc_signer import parse_sign_mechanisms
+        from sedo.opensc_signer import parse_sign_mechanisms
         assert parse_sign_mechanisms(REAL_ST338.splitlines()) == [
             0x252, 0x80420014, 0x80420015, 0x80420031, 0x80420032]
 
     def test_real_list_chooses_dstu_not_a_mac(self):
-        from mechanism_ids import choose_sign_mechanism
-        from opensc_signer import parse_sign_mechanisms
+        from sedo.mechanism_ids import choose_sign_mechanism
+        from sedo.opensc_signer import parse_sign_mechanisms
         ids = parse_sign_mechanisms(REAL_ST338.splitlines())
         assert choose_sign_mechanism(ids) == 0x80420031
 
     def test_second_mac_is_never_chosen(self):
-        from mechanism_ids import NON_SIGNATURE_MECHANISMS, choose_sign_mechanism
+        from sedo.mechanism_ids import NON_SIGNATURE_MECHANISMS, choose_sign_mechanism
         assert 0x80420015 in NON_SIGNATURE_MECHANISMS
         assert choose_sign_mechanism([0x80420014, 0x80420015, 0x80421234]) == 0x80421234
 
 
 class TestUnknownVendorMechanism:
     def test_parse_sign_mechanisms(self):
-        from opensc_signer import parse_sign_mechanisms
+        from sedo.opensc_signer import parse_sign_mechanisms
         ids = parse_sign_mechanisms(LIST_MECHANISMS.decode().splitlines())
         assert ids == [0x80420014, 0x352]
 
     def test_sign_recover_is_not_sign(self):
-        from opensc_signer import parse_sign_mechanisms
+        from sedo.opensc_signer import parse_sign_mechanisms
         assert parse_sign_mechanisms(["  mechanism-0x1234, signRecover"]) == []
 
     def _build(self, tmp_path, module_name, stdout=LIST_MECHANISMS, rc=0):
@@ -208,8 +208,8 @@ class TestUnknownVendorMechanism:
             calls.append(list(cmd))
             return subprocess.CompletedProcess(cmd, rc, stdout=stdout, stderr=b"boom")
 
-        with patch("opensc_signer.OpenSCSigner._find_tool", return_value=tool), \
-             patch("opensc_signer.subprocess.run", side_effect=fake_run):
+        with patch("sedo.opensc_signer.OpenSCSigner._find_tool", return_value=tool), \
+             patch("sedo.opensc_signer.subprocess.run", side_effect=fake_run):
             c = SEDOClient(backend="opensc", module_path=module)
         return c.signer, calls
 
@@ -234,7 +234,7 @@ class TestUnknownVendorMechanism:
 
 
 def test_32bit_opensc_is_found_first():
-    from opensc_signer import OpenSCSigner
+    from sedo.opensc_signer import OpenSCSigner
     paths = OpenSCSigner.DEFAULT_PKCS11_TOOL_PATHS
     x86 = next(i for i, p in enumerate(paths) if "(x86)" in p)
     x64 = next(i for i, p in enumerate(paths) if p.startswith(r"C:\Program Files\OpenSC"))
@@ -259,7 +259,7 @@ class TestResourceRelease:
         c.session.close.assert_called_once()
 
     def test_iit_client_exit_closes_http_session(self):
-        with patch("iit_client.requests.Session") as S:
+        with patch("sedo.iit_client.requests.Session") as S:
             c = IITClient()
         c.call = MagicMock()
         with c:
@@ -267,13 +267,13 @@ class TestResourceRelease:
         S.return_value.close.assert_called_once()
 
     def test_iit_adapter_close_closes_client(self):
-        from sedo_client import IITAgentAdapter
+        from sedo.client import IITAgentAdapter
         client = MagicMock()
         IITAgentAdapter(client).close()
         client.close.assert_called_once()
 
     def test_finalize_uses_reset_private_key(self):
-        with patch("iit_client.requests.Session"):
+        with patch("sedo.iit_client.requests.Session"):
             c = IITClient()
         c.call = MagicMock()
         c.reset_private_key = MagicMock()
@@ -281,7 +281,7 @@ class TestResourceRelease:
         c.reset_private_key.assert_called_once()
 
     def test_pkcs11_close_unloads_the_module(self, fake_pykcs11, tmp_path):
-        from pkcs11_signer import PKCS11Signer
+        from sedo.pkcs11_signer import PKCS11Signer
         dll = tmp_path / "PKCS11.EKeyAlmaz1C.dll"
         dll.write_bytes(b"x")
         fake_pykcs11.MECHS = {0x80420031: fake_pykcs11.CKF_SIGN}
@@ -291,19 +291,19 @@ class TestResourceRelease:
         assert fake_pykcs11.UNLOADS == [str(dll)]
 
     def test_virtual_close_unloads_the_module(self, fake_pykcs11, tmp_path):
-        from virtual_signer import VirtualSigner
+        from sedo.virtual_signer import VirtualSigner
         dll = tmp_path / "PKCS11.Virtual.EKeyAlmaz1C.dll"
         dll.write_bytes(b"x")
         s = VirtualSigner(module_path=str(dll))
         s.close()
         assert fake_pykcs11.UNLOADS == [str(dll)]
 
-    @pytest.mark.parametrize("cls_path", ["pkcs11_signer.PKCS11Signer",
-                                          "virtual_signer.VirtualSigner"])
+    @pytest.mark.parametrize("cls_path", ["sedo.pkcs11_signer.PKCS11Signer",
+                                          "sedo.virtual_signer.VirtualSigner"])
     def test_failed_init_does_not_leave_the_module_loaded(self, fake_pykcs11,
                                                           tmp_path, cls_path):
         import importlib
-        mod_name, cls_name = cls_path.split(".")
+        mod_name, cls_name = cls_path.rsplit(".", 1)
         cls = getattr(importlib.import_module(mod_name), cls_name)
         dll = tmp_path / "PKCS11.Virtual.EKeyAlmaz1C.dll"
         dll.write_bytes(b"x")
@@ -370,7 +370,7 @@ class TestRegistry:
 
 class TestEmptyPin:
     def test_read_pin_order(self, monkeypatch):
-        from _console import read_pin
+        from sedo._console import read_pin
         monkeypatch.setenv("SEDO_PIN", "env")
         assert read_pin("argv") == "argv"
         assert read_pin(None) == "env"
@@ -382,7 +382,7 @@ class TestEmptyPin:
         {"return_value": ""}, {"side_effect": EOFError},
     ])
     def test_read_pin_empty_exits(self, monkeypatch, prompt):
-        from _console import read_pin
+        from sedo._console import read_pin
         monkeypatch.delenv("SEDO_PIN", raising=False)
         with patch("getpass.getpass", **prompt), pytest.raises(SystemExit) as e:
             read_pin(None)
@@ -390,14 +390,14 @@ class TestEmptyPin:
 
     def test_opensc_cli_empty_pin_does_not_exit_zero(self, tmp_path, monkeypatch):
         """The regression: Enter at the prompt → --sign skipped, exit 0."""
-        from opensc_signer import main
+        from sedo.opensc_signer import main
         monkeypatch.chdir(tmp_path)
         monkeypatch.delenv("SEDO_PIN", raising=False)
         (tmp_path / "d.bin").write_bytes(b"x")
         monkeypatch.setattr(sys, "argv", ["opensc_signer", "--module", "m.dll",
                                           "--sign", "d.bin"])
         fake = MagicMock()
-        with patch("opensc_signer.OpenSCSigner", return_value=fake), \
+        with patch("sedo.opensc_signer.OpenSCSigner", return_value=fake), \
              patch("getpass.getpass", return_value=""), \
              pytest.raises(SystemExit) as e:
             main()
@@ -406,39 +406,39 @@ class TestEmptyPin:
         fake.sign.assert_not_called()
 
     def test_opensc_cli_reads_sedo_pin(self, tmp_path, monkeypatch):
-        from opensc_signer import main
+        from sedo.opensc_signer import main
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("SEDO_PIN", "4321")
         monkeypatch.setattr(sys, "argv", ["opensc_signer", "--module", "m.dll",
                                           "--list-objects"])
         fake = MagicMock()
         fake.list_objects.return_value = "objects"
-        with patch("opensc_signer.OpenSCSigner", return_value=fake), \
+        with patch("sedo.opensc_signer.OpenSCSigner", return_value=fake), \
              patch("getpass.getpass") as gp:
             main()
         gp.assert_not_called()
         fake.login.assert_called_once_with("4321")
 
     def test_sedo_client_empty_pin_never_builds_a_client(self, tmp_path, monkeypatch):
-        from sedo_client import main
+        from sedo.client import main
         monkeypatch.chdir(tmp_path)
         monkeypatch.delenv("SEDO_PIN", raising=False)
         monkeypatch.setattr(sys, "argv", ["sedo-client"])
-        with patch("sedo_client.SEDOClient") as cls, \
+        with patch("sedo.client.SEDOClient") as cls, \
              patch("getpass.getpass", return_value=""), \
              pytest.raises(SystemExit):
             main()
         cls.assert_not_called()
 
     def test_pkcs11_cli_empty_pin_never_logs_in(self, tmp_path, monkeypatch):
-        import pkcs11_signer
+        from sedo import pkcs11_signer
         monkeypatch.chdir(tmp_path)
         monkeypatch.delenv("SEDO_PIN", raising=False)
         (tmp_path / "d.bin").write_bytes(b"x")
         monkeypatch.setattr(sys, "argv", ["pkcs11_signer", "--module", "m.dll",
                                           "--sign", "d.bin"])
         fake = MagicMock()
-        with patch("pkcs11_signer.PKCS11Signer", return_value=fake), \
+        with patch("sedo.pkcs11_signer.PKCS11Signer", return_value=fake), \
              patch("getpass.getpass", return_value=""), \
              pytest.raises(SystemExit):
             pkcs11_signer.main()
@@ -448,10 +448,10 @@ class TestEmptyPin:
 # ─── 9. A1: every backend declares what sign() returns ─────
 
 def test_signature_formats_are_declared():
-    from opensc_signer import OpenSCSigner
-    from pkcs11_signer import PKCS11Signer
-    from sedo_client import IITAgentAdapter
-    from virtual_signer import VirtualSigner
+    from sedo.opensc_signer import OpenSCSigner
+    from sedo.pkcs11_signer import PKCS11Signer
+    from sedo.client import IITAgentAdapter
+    from sedo.virtual_signer import VirtualSigner
     assert OpenSCSigner.signature_format == "raw"
     assert PKCS11Signer.signature_format == "raw"
     assert VirtualSigner.signature_format == "raw"
@@ -459,7 +459,7 @@ def test_signature_formats_are_declared():
 
 
 def test_non_object_documents_are_skipped(tmp_path, monkeypatch):
-    from sedo_client import main
+    from sedo.client import main
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(sys, "argv", ["sedo-client", "--pin", "1", "--fetch",
                                       "--output", str(tmp_path / "out")])
@@ -467,6 +467,6 @@ def test_non_object_documents_are_skipped(tmp_path, monkeypatch):
     sedo = fake_ctx.__enter__.return_value
     sedo.fetch_inbox.return_value = ["junk", {"id": "doc-1"}]
     sedo.download_document.return_value = Path("doc-1.zip")
-    with patch("sedo_client.SEDOClient", return_value=fake_ctx):
+    with patch("sedo.client.SEDOClient", return_value=fake_ctx):
         main()
     sedo.download_document.assert_called_once()

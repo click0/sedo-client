@@ -367,7 +367,7 @@ class OpenSCSigner:
 
 def main():
     import argparse
-    from _console import force_utf8_io, module_from_env, read_pin
+    from ._console import force_utf8_io, module_from_env, read_pin
     force_utf8_io()
     parser = argparse.ArgumentParser(description="OpenSC pkcs11-tool wrapper")
     parser.add_argument("--module", help="PKCS#11 DLL (or $SEDO_MODULE)")

@@ -73,7 +73,7 @@ def module_candidates(defaults) -> list:
     Authority-1.3\\End User" directory, which was not on the list.
     """
     import ntpath
-    from _console import MODULE_DIRS_ENV
+    from ._console import MODULE_DIRS_ENV
     names = list(dict.fromkeys(ntpath.basename(p) for p in defaults))
     raw = os.environ.get(MODULE_DIRS_ENV, "")
     dirs = [d.strip() for d in raw.split(os.pathsep) if d.strip()]
@@ -425,7 +425,7 @@ class PKCS11Signer:
 
         Повертає numeric mechanism ID.
         """
-        from mechanism_ids import choose_sign_mechanism
+        from .mechanism_ids import choose_sign_mechanism
 
         # The slot we are logged into, not slots[0]: with two tokens present,
         # login(pin, slot=1) used to discover mechanisms on slot 0 and then
@@ -534,7 +534,7 @@ class PKCS11Signer:
 
 def main():
     import argparse
-    from _console import force_utf8_io, module_from_env, read_pin
+    from ._console import force_utf8_io, module_from_env, read_pin
     force_utf8_io()
 
     parser = argparse.ArgumentParser(
@@ -587,7 +587,7 @@ def main():
         # 0x80420014 (SYM_MAC), і порада підписати ним спалює одну з 15
         # PIN-спроб. login() використовує саме цю політику, тож підказка
         # мусить збігатися з тим, що клієнт реально робить.
-        from mechanism_ids import choose_sign_mechanism
+        from .mechanism_ids import choose_sign_mechanism
         signing = [m for m in mechs if m["can_sign"]]
         print()
         try:

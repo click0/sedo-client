@@ -13,18 +13,25 @@ Usage:
 import importlib.util
 import subprocess
 import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+
+# The entry point: the package's __main__, which imports sedo.client by its
+# absolute name (a relative import has no parent package in a frozen script).
+ENTRY = ROOT / "sedo" / "__main__.py"
 
 # Our own modules imported lazily inside SEDOClient._pick_backend /
 # find_sign_mechanism — invisible to PyInstaller static analysis.
 HIDDEN_MODULES = [
-    "_console",
-    "sedo_config",
-    "sedo_check",
-    "opensc_signer",
-    "pkcs11_signer",
-    "virtual_signer",
-    "iit_client",
-    "mechanism_ids",
+    "sedo._console",
+    "sedo.config",
+    "sedo.check",
+    "sedo.opensc_signer",
+    "sedo.pkcs11_signer",
+    "sedo.virtual_signer",
+    "sedo.iit_client",
+    "sedo.mechanism_ids",
 ]
 
 
@@ -36,6 +43,9 @@ def main() -> int:
         "--clean",
         "--noconfirm",
         "--console",
+        # The repository root, so that the entry's `import sedo` resolves
+        # however the script is started.
+        "--paths", str(ROOT),
     ]
     for mod in HIDDEN_MODULES:
         args += ["--hidden-import", mod]
@@ -48,7 +58,7 @@ def main() -> int:
     else:
         print("PyKCS11 not installed — building with opensc/iit_agent only.")
 
-    args.append("sedo_client.py")
+    args.append(str(ENTRY))
     print("Running:", " ".join(args))
     return subprocess.call(args)
 

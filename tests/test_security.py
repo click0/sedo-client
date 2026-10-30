@@ -14,16 +14,16 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-import iit_client
-from iit_client import IITClient, probe_port
-from sedo_client import SEDOClient, _safe_doc_id, _build_parser
-from opensc_signer import OpenSCSigner
+from sedo import iit_client
+from sedo.iit_client import IITClient, probe_port
+from sedo.client import SEDOClient, _safe_doc_id, _build_parser
+from sedo.opensc_signer import OpenSCSigner
 
 
 # ─── S1: PIN must never reach the debug log ──────────────────
 
 class TestPinNotLogged:
-    @patch("iit_client.requests.Session")
+    @patch("sedo.iit_client.requests.Session")
     def test_read_private_key_params_redacted(self, mock_session_cls, caplog):
         mock_session = MagicMock()
         mock_session_cls.return_value = mock_session
@@ -32,13 +32,13 @@ class TestPinNotLogged:
             json=lambda: {"jsonrpc": "2.0", "id": 1, "result": None},
         )
         client = IITClient(port=9100)
-        with caplog.at_level(logging.DEBUG, logger="iit_client"):
+        with caplog.at_level(logging.DEBUG, logger="sedo.iit_client"):
             client.read_private_key({"devIndex": 0}, "9876")
         assert "9876" not in caplog.text
         assert "ReadPrivateKey" in caplog.text
         assert "[***]" in caplog.text
 
-    @patch("iit_client.requests.Session")
+    @patch("sedo.iit_client.requests.Session")
     def test_non_secret_method_params_still_logged(self, mock_session_cls, caplog):
         mock_session = MagicMock()
         mock_session_cls.return_value = mock_session
@@ -47,7 +47,7 @@ class TestPinNotLogged:
             json=lambda: {"jsonrpc": "2.0", "id": 1, "result": None},
         )
         client = IITClient(port=9100)
-        with caplog.at_level(logging.DEBUG, logger="iit_client"):
+        with caplog.at_level(logging.DEBUG, logger="sedo.iit_client"):
             client.call("GetOwnCertificate", [7])
         assert "[7]" in caplog.text
 
@@ -69,7 +69,7 @@ class TestTlsVerifyOnlyLoopback:
         assert iit_client._is_loopback("10.0.0.5") is False
         assert iit_client._is_loopback("not-an-ip") is False
 
-    @patch("iit_client.requests.options")
+    @patch("sedo.iit_client.requests.options")
     def test_probe_port_verify_kwarg(self, mock_options):
         mock_options.return_value = MagicMock(status_code=200)
         probe_port("10.0.0.5", 8083, use_https=True)
@@ -88,7 +88,7 @@ class FakeSigner:
 
 
 def _make_client():
-    with patch("sedo_client.SEDOClient._pick_backend", return_value=FakeSigner()):
+    with patch("sedo.client.SEDOClient._pick_backend", return_value=FakeSigner()):
         client = SEDOClient()
     client.session = MagicMock()
     return client
@@ -133,9 +133,9 @@ class TestPinFromEnvironment:
         monkeypatch.setenv("SEDO_PIN", "env-pin")
         monkeypatch.setattr(sys, "argv", ["sedo-client"])
         fake_ctx = MagicMock()
-        with patch("sedo_client.SEDOClient", return_value=fake_ctx), \
+        with patch("sedo.client.SEDOClient", return_value=fake_ctx), \
              patch("getpass.getpass") as gp:
-            from sedo_client import main
+            from sedo.client import main
             main()
             gp.assert_not_called()
         sedo = fake_ctx.__enter__.return_value
@@ -146,8 +146,8 @@ class TestPinFromEnvironment:
         monkeypatch.setenv("SEDO_PIN", "env-pin")
         monkeypatch.setattr(sys, "argv", ["sedo-client", "--pin", "argv-pin"])
         fake_ctx = MagicMock()
-        with patch("sedo_client.SEDOClient", return_value=fake_ctx):
-            from sedo_client import main
+        with patch("sedo.client.SEDOClient", return_value=fake_ctx):
+            from sedo.client import main
             main()
         fake_ctx.__enter__.return_value.authorize.assert_called_once_with("argv-pin")
 
@@ -171,7 +171,7 @@ class TestOpenSCTempDir:
         s.login("1234")
         return s
 
-    @patch("opensc_signer.subprocess.run")
+    @patch("sedo.opensc_signer.subprocess.run")
     def test_sign_uses_private_tmpdir_and_cleans_up(self, mock_run, tmp_path):
         signer = self._signer(tmp_path)
         seen = {}
@@ -194,7 +194,7 @@ class TestOpenSCTempDir:
             assert seen["mode"] == 0o700
         assert not seen["inp"].parent.exists()
 
-    @patch("opensc_signer.subprocess.run")
+    @patch("sedo.opensc_signer.subprocess.run")
     def test_get_certificate_cleans_up(self, mock_run, tmp_path):
         signer = self._signer(tmp_path)
         seen = {}

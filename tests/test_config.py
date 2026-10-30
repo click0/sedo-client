@@ -11,8 +11,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-import sedo_config as sc
-from sedo_client import SEDOClient
+from sedo import config as sc
+from sedo.client import SEDOClient
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -336,8 +336,8 @@ class TestBackendExtras:
         tool.write_bytes(b"x")
         dll = tmp_path / "PKCS11.EKeyAlmaz1C.dll"
         dll.write_bytes(b"x")
-        with patch("opensc_signer.OpenSCSigner._find_tool", return_value=str(tool)), \
-             patch("opensc_signer.subprocess.run") as run:
+        with patch("sedo.opensc_signer.OpenSCSigner._find_tool", return_value=str(tool)), \
+             patch("sedo.opensc_signer.subprocess.run") as run:
             with patch.object(SEDOClient, "_discover_opensc_mechanism") as disc:
                 c = SEDOClient.__new__(SEDOClient)
                 c.sedo_url = "x"
@@ -347,7 +347,7 @@ class TestBackendExtras:
         assert s._mechanism == "0x80420032" and s._cert_id == "07"
 
     def test_pkcs11_profile_cert_id_and_mechanism(self, fake_pykcs11, tmp_path):
-        from pkcs11_signer import PKCS11Signer
+        from sedo.pkcs11_signer import PKCS11Signer
         P = fake_pykcs11
         P.MECHS = {0x80420031: P.CKF_SIGN, 0x80420032: P.CKF_SIGN}
         k1, k2, c1, c2 = object(), object(), object(), object()
@@ -363,7 +363,7 @@ class TestBackendExtras:
         assert P.SIGN_CALLS[-1] == (k2, 0x80420032)
 
     def test_pkcs11_missing_cert_id_is_an_error_not_a_fallback(self, fake_pykcs11, tmp_path):
-        from pkcs11_signer import PKCS11Signer
+        from sedo.pkcs11_signer import PKCS11Signer
         P = fake_pykcs11
         P.MECHS = {0x80420031: P.CKF_SIGN}
         dll = tmp_path / "PKCS11.EKeyAlmaz1C.dll"
@@ -373,7 +373,7 @@ class TestBackendExtras:
         assert P.SESSIONS[-1].closed
 
     def test_iit_adapter_cert_index(self):
-        from sedo_client import IITAgentAdapter
+        from sedo.client import IITAgentAdapter
         client = MagicMock()
         client.enum_key_media_devices.return_value = [{"devIndex": 0}]
         client.enum_own_certificates.return_value = [{}, {}]
@@ -388,7 +388,7 @@ class TestBackendExtras:
 
 class TestCLI:
     def _run(self, tmp_path, monkeypatch, argv, cfg_text=None, env=None):
-        from sedo_client import main
+        from sedo.client import main
         monkeypatch.chdir(tmp_path)
         for var in ("SEDO_PIN", "SEDO_MODULE", "SEDO_CONFIG"):
             monkeypatch.delenv(var, raising=False)
@@ -424,7 +424,7 @@ class TestCLI:
         sedo = fake_ctx.__enter__.return_value
         sedo.sign_document.return_value = b"\x01\x02"
         sedo.signers = {"sign": MagicMock(signature_format="raw")}
-        with patch("sedo_client.SEDOClient", return_value=fake_ctx) as cls:
+        with patch("sedo.client.SEDOClient", return_value=fake_ctx) as cls:
             main()
         sedo.login.assert_called_once_with("sign", "doc-pin")        # not the login key's PIN
         sedo.sign_document.assert_called_once_with(b"payload")
@@ -438,7 +438,7 @@ class TestCLI:
         main = self._run(tmp_path, monkeypatch, ["--sign-file", "doc.bin"],
                          "[keys.login]\n[keys.doc]\n[roles]\nauth='login'\nsign='doc'\n",
                          env={"SEDO_PIN": "login-pin"})
-        with patch("sedo_client.SEDOClient"), patch("getpass.getpass", return_value="") as gp, \
+        with patch("sedo.client.SEDOClient"), patch("getpass.getpass", return_value="") as gp, \
              pytest.raises(SystemExit) as e:
             main()
         assert e.value.code == 2 and gp.called            # asked, not reused
@@ -448,7 +448,7 @@ class TestCLI:
                          "[sedo]\noutput='from-config'\nsince='2026-01-02'\n[keys.k]\n")
         fake_ctx = MagicMock()
         fake_ctx.__enter__.return_value.fetch_inbox.return_value = []
-        with patch("sedo_client.SEDOClient", return_value=fake_ctx):
+        with patch("sedo.client.SEDOClient", return_value=fake_ctx):
             main()
         fake_ctx.__enter__.return_value.fetch_inbox.assert_called_once_with(since="2026-01-02")
         assert (tmp_path / "from-config").is_dir()
@@ -457,7 +457,7 @@ class TestCLI:
         main = self._run(tmp_path, monkeypatch, [], "[keys.almaz]\n",
                          env={"SEDO_PIN_ALMAZ": "profile-pin"})
         fake_ctx = MagicMock()
-        with patch("sedo_client.SEDOClient", return_value=fake_ctx), patch("getpass.getpass") as gp:
+        with patch("sedo.client.SEDOClient", return_value=fake_ctx), patch("getpass.getpass") as gp:
             main()
         gp.assert_not_called()
         fake_ctx.__enter__.return_value.authorize.assert_called_once_with("profile-pin")

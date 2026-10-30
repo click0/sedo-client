@@ -109,7 +109,7 @@ class VirtualSigner:
         try:
             info = self._pkcs11.getInfo()
         except Exception:
-            from pkcs11_signer import unload_module
+            from .pkcs11_signer import unload_module
             unload_module(self._pkcs11)
             raise
         log.info("Library: %s v%d.%d",
@@ -118,7 +118,7 @@ class VirtualSigner:
 
     @classmethod
     def _find_module(cls) -> str:
-        from pkcs11_signer import module_candidates
+        from .pkcs11_signer import module_candidates
         for path in module_candidates(cls.DEFAULT_VIRTUAL_PATHS):
             if Path(path).exists():
                 return path
@@ -136,8 +136,8 @@ class VirtualSigner:
         0x00000352), then any vendor-defined (>= 0x80000000) with CKF_SIGN.
         Uses the slot we logged into, not blindly slots[0].
         """
-        from mechanism_ids import choose_sign_mechanism
-        from pkcs11_signer import resolve_slot, signing_mechanism_ids
+        from .mechanism_ids import choose_sign_mechanism
+        from .pkcs11_signer import resolve_slot, signing_mechanism_ids
 
         slot = resolve_slot(self._pkcs11, slot, "virtual token slot")
 
@@ -153,7 +153,7 @@ class VirtualSigner:
         return mech
 
     def login(self, pin: str, slot: Optional[int] = None) -> None:
-        from pkcs11_signer import (check_almaz_mutex, close_session,
+        from .pkcs11_signer import (check_almaz_mutex, close_session,
                                    open_logged_in_session, resolve_slot,
                                    select_key_and_cert)
         held = check_almaz_mutex()
@@ -215,7 +215,7 @@ class VirtualSigner:
 
     def logout(self) -> None:
         if self._session:
-            from pkcs11_signer import close_session
+            from .pkcs11_signer import close_session
             close_session(self._session)
             self._session = None
             self._priv_key = None
@@ -223,7 +223,7 @@ class VirtualSigner:
 
     def close(self) -> None:
         """logout() + unload the module (releases the shared IIT mutex)."""
-        from pkcs11_signer import unload_module
+        from .pkcs11_signer import unload_module
         self.logout()
         unload_module(self._pkcs11)
 

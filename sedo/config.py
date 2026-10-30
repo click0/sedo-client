@@ -127,12 +127,13 @@ def default_config_dir() -> Path:
     """Where config.toml / config_local.toml live: next to the client.
 
     Development and the documented deployment (git clone → C:\\sedo-client,
-    `python sedo_client.py`) put them in the repository root; a PyInstaller
-    binary looks next to the .exe.
+    `python sedo_client.py`) put them in the repository root, one level above
+    this package (sedo/config.py → the root); a PyInstaller binary looks next
+    to the .exe.
     """
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
-    return Path(__file__).resolve().parent
+    return Path(__file__).resolve().parent.parent
 
 
 def _read_toml(path: Path) -> dict:
@@ -311,7 +312,7 @@ def resolve_profile_pin(profile: KeyProfile, argv_pin: Optional[str] = None,
     auth one: the generic SEDO_PIN belongs to the login key, and sending it to
     another token would spend one of ITS attempts.
     """
-    from _console import PIN_ENV, read_pin
+    from ._console import PIN_ENV, read_pin
     env = os.environ if env is None else env
     if argv_pin:
         return argv_pin

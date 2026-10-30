@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
-from opensc_signer import OpenSCSigner, parse_objects, select_cert_id
+from sedo.opensc_signer import OpenSCSigner, parse_objects, select_cert_id
 
 TWO_PAIRS = """\
 Using slot 0 with a present token (0x8ff34ca)
@@ -111,7 +111,7 @@ def _runner(list_objects_text: str, calls: list):
 
 
 class TestSignerUsesTokenId:
-    @patch("opensc_signer.subprocess.run")
+    @patch("sedo.opensc_signer.subprocess.run")
     def test_certificate_and_signature_use_the_detected_id(self, mock_run, tmp_path):
         text = TWO_PAIRS.replace("  ID:         01\n", "  ID:         77\n", 1)   # only pair = 02
         calls = []
@@ -123,7 +123,7 @@ class TestSignerUsesTokenId:
         assert ids == ["02", "02"]
         assert sum("--list-objects" in a for a in calls) == 1     # detected once
 
-    @patch("opensc_signer.subprocess.run")
+    @patch("sedo.opensc_signer.subprocess.run")
     def test_explicit_cert_id_skips_detection(self, mock_run, tmp_path):
         calls = []
         mock_run.side_effect = _runner(TWO_PAIRS, calls)
@@ -131,7 +131,7 @@ class TestSignerUsesTokenId:
         assert not any("--list-objects" in a for a in calls)
         assert calls[0][calls[0].index("--id") + 1] == "05"
 
-    @patch("opensc_signer.subprocess.run")
+    @patch("sedo.opensc_signer.subprocess.run")
     def test_wrong_pin_costs_one_attempt_and_nothing_is_signed(self, mock_run, tmp_path):
         mock_run.return_value = subprocess.CompletedProcess([], 1, stdout=b"", stderr=b"CKR_PIN_INCORRECT")
         s = _signer(tmp_path)
@@ -139,7 +139,7 @@ class TestSignerUsesTokenId:
             s.sign(b"data")
         assert mock_run.call_count == 1
 
-    @patch("opensc_signer.subprocess.run")
+    @patch("sedo.opensc_signer.subprocess.run")
     def test_logout_forgets_the_detected_id(self, mock_run, tmp_path):
         calls = []
         mock_run.side_effect = _runner(TWO_PAIRS, calls)

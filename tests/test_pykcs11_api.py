@@ -7,7 +7,7 @@ mirrors that behaviour.
 
 import pytest
 
-from pkcs11_signer import iter_mechanisms, mechanism_id, signing_mechanism_ids
+from sedo.pkcs11_signer import iter_mechanisms, mechanism_id, signing_mechanism_ids
 
 
 class TestMechanismId:
@@ -56,7 +56,7 @@ class TestAgainstTheRealisticFake:
 
     def test_login_on_a_token_with_standard_mechanisms(self, fake_pykcs11, tmp_path):
         """The regression: int('CKM_RSA_PKCS') → ValueError at login()."""
-        from pkcs11_signer import PKCS11Signer
+        from sedo.pkcs11_signer import PKCS11Signer
         P = fake_pykcs11
         P.MECHS = {0x1: P.CKF_SIGN, 0x250: 0, 0x80420014: P.CKF_SIGN, 0x80420031: P.CKF_SIGN}
         dll = tmp_path / "PKCS11.EKeyAlmaz1C.dll"
@@ -68,7 +68,7 @@ class TestAgainstTheRealisticFake:
         assert "CKM_RSA_PKCS" in names and "CKM_VENDOR_DEFINED_0x420031" in names
 
     def test_virtual_login_on_a_token_with_standard_mechanisms(self, fake_pykcs11, tmp_path):
-        from virtual_signer import VirtualSigner
+        from sedo.virtual_signer import VirtualSigner
         P = fake_pykcs11
         P.MECHS = {0x1041: P.CKF_SIGN, 0x80420031: P.CKF_SIGN}
         dll = tmp_path / "PKCS11.Virtual.EKeyAlmaz1C.dll"
@@ -78,7 +78,7 @@ class TestAgainstTheRealisticFake:
         assert v._sign_mechanism == 0x80420031
 
     def test_pykcs11error_from_login_becomes_runtimeerror(self, fake_pykcs11, tmp_path):
-        from pkcs11_signer import PKCS11Signer
+        from sedo.pkcs11_signer import PKCS11Signer
         P = fake_pykcs11
         P.MECHS = {0x80420031: P.CKF_SIGN}
         P.LOGIN_ERROR = P.PyKCS11Error("CKR_PIN_INCORRECT (0x000000A0)")

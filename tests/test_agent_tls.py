@@ -14,8 +14,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-import iit_client
-from iit_client import IITClient, IITAgentNotFound, origin_from_url, probe_port, verify_agent
+from sedo import iit_client
+from sedo.iit_client import IITClient, IITAgentNotFound, origin_from_url, probe_port, verify_agent
 
 DER = b"\x30\x82\x01\x00" + bytes(range(256))      # any bytes: DER→PEM is a pure re-encoding
 
@@ -93,7 +93,7 @@ class TestCaFiles:
         monkeypatch.setenv(iit_client.AGENT_CA_ENV, str(mine))
         assert iit_client.agent_ca_files() == [mine, with_ca]
         monkeypatch.setenv(iit_client.AGENT_CA_ENV, str(with_ca.parent / "gone.pem"))
-        with caplog.at_level(logging.WARNING, logger="iit_client"):
+        with caplog.at_level(logging.WARNING, logger="sedo.iit_client"):
             assert iit_client.agent_ca_files() == [with_ca]
         assert "gone.pem" in caplog.text and "does not exist" in caplog.text
 
@@ -119,7 +119,7 @@ class TestCaFiles:
     def test_unwritable_cache_means_unverified(self, with_ca, monkeypatch, caplog):
         monkeypatch.setattr(iit_client, "_bundle_dir",
                             lambda env=None: with_ca)       # a file, not a directory
-        with caplog.at_level(logging.WARNING, logger="iit_client"):
+        with caplog.at_level(logging.WARNING, logger="sedo.iit_client"):
             assert iit_client.agent_ca_bundle() is None
         assert "TLS stays unverified" in caplog.text
 
@@ -151,14 +151,14 @@ class TestFallback:
 
     def test_probe_and_verify_retry_unverified(self, with_ca):
         calls = []
-        with patch("iit_client.requests.options", side_effect=self._ssl_then_ok(calls)), \
-             patch("iit_client.requests.post", side_effect=self._ssl_then_ok(calls)):
+        with patch("sedo.iit_client.requests.options", side_effect=self._ssl_then_ok(calls)), \
+             patch("sedo.iit_client.requests.post", side_effect=self._ssl_then_ok(calls)):
             assert probe_port("127.0.0.1", 8083, use_https=True) is True
             assert verify_agent("127.0.0.1", 8083, use_https=True) is True
         assert [isinstance(v, str) for v in calls] == [True, False, True, False]
 
     def test_remote_ssl_error_is_not_retried(self, with_ca):
-        with patch("iit_client.requests.options",
+        with patch("sedo.iit_client.requests.options",
                    side_effect=requests.exceptions.SSLError("bad")) as opt:
             assert probe_port("10.0.0.5", 8083, use_https=True) is False
         assert opt.call_count == 1
@@ -176,7 +176,7 @@ class TestFallback:
             return MagicMock(status_code=200,
                              json=lambda: {"jsonrpc": "2.0", "id": 1, "result": "1.3.1"})
         c.session.post = post
-        with caplog.at_level(logging.WARNING, logger="iit_client"):
+        with caplog.at_level(logging.WARNING, logger="sedo.iit_client"):
             assert c.get_version() == "1.3.1"
             assert c.get_version() == "1.3.1"
         assert seen == [bundle, False, False]
@@ -192,12 +192,12 @@ class TestFallback:
 
 
 class TestCheckAgent:
-    """sedo_check._check_agent on a fake client."""
+    """sedo.check._check_agent on a fake client."""
 
     def _run(self, monkeypatch, *, https, autorun, trusted, verify="bundle.pem",
              fallback=None, url="https://sedo.mod.gov.ua/"):
-        import sedo_check as chk
-        from sedo_config import KeyProfile
+        from sedo import check as chk
+        from sedo.config import KeyProfile
 
         class _Client:
             def __init__(self, **kw):

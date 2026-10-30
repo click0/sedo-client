@@ -54,5 +54,5 @@ def test_non_secret_method_params_shown(tmp_path, capsys):
 
 def test_redaction_set_matches_iit_client():
     """scripts/ duplicates the set — keep it in sync with iit_client."""
-    import iit_client
+    from sedo import iit_client
     assert _load_script()._REDACTED_METHODS == iit_client._REDACTED_METHODS

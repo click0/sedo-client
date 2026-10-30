@@ -89,16 +89,16 @@ def _module_for(profile):
         return env, "$SEDO_MODULE"
     try:
         if profile.backend == "virtual":
-            from virtual_signer import VirtualSigner
+            from .virtual_signer import VirtualSigner
             return VirtualSigner._find_module(), "автопошук"
-        from pkcs11_signer import PKCS11Signer
+        from .pkcs11_signer import PKCS11Signer
         return PKCS11Signer._find_module(), "автопошук"
     except FileNotFoundError:
         return None, "автопошук"
 
 
 def _pin_source(profile, is_auth_key: bool) -> tuple:
-    from _console import PIN_ENV
+    from ._console import PIN_ENV
     if profile.pin:
         return WARN, "PIN записано у файлі конфігу (краще pin_env або pin_file)"
     var = profile.effective_pin_env
@@ -114,8 +114,8 @@ def _pin_source(profile, is_auth_key: bool) -> tuple:
 
 def _check_opensc(profile, module: str, rep: Report) -> None:
     import subprocess
-    from mechanism_ids import choose_sign_mechanism
-    from opensc_signer import OpenSCNotFound, OpenSCSigner, parse_objects
+    from .mechanism_ids import choose_sign_mechanism
+    from .opensc_signer import OpenSCNotFound, OpenSCSigner, parse_objects
     try:
         tool = OpenSCSigner._find_tool()
     except OpenSCNotFound as e:
@@ -181,8 +181,8 @@ def _check_pykcs11(profile, module: str, rep: Report) -> None:
         rep.add(FAIL, f"модуль {mb}-bit, а Python {python_bitness()}-bit: PyKCS11 його не завантажить. "
                       f"Потрібен Python {mb}-bit або backend = \"opensc\"")
         return
-    from pkcs11_signer import iter_mechanisms, resolve_slot
-    from mechanism_ids import choose_sign_mechanism
+    from .pkcs11_signer import iter_mechanisms, resolve_slot
+    from .mechanism_ids import choose_sign_mechanism
     lib = PyKCS11.PyKCS11Lib()
     try:
         lib.load(module)
@@ -235,7 +235,7 @@ def _check_pykcs11(profile, module: str, rep: Report) -> None:
 
 
 def _check_agent(profile, sedo_url: str, rep: Report) -> None:
-    from iit_client import (AGENT_CA_ENV, IITClient, IITError, discover_agent,
+    from .iit_client import (AGENT_CA_ENV, IITClient, IITError, discover_agent,
                             origin_from_url, read_agent_autorun, read_trusted_sites)
     autorun = read_agent_autorun()
     if autorun is False:
@@ -295,7 +295,7 @@ def check_profile(profile, sedo_url: str, is_auth_key: bool, rep: Report) -> Non
             if backend == "auto":
                 import importlib.util
                 has_pykcs11 = importlib.util.find_spec("PyKCS11") is not None
-                from opensc_signer import OpenSCNotFound, OpenSCSigner
+                from .opensc_signer import OpenSCNotFound, OpenSCSigner
                 try:
                     OpenSCSigner._find_tool()
                     backend = "opensc"
@@ -318,7 +318,7 @@ def check_profile(profile, sedo_url: str, is_auth_key: bool, rep: Report) -> Non
 
 
 def run_checks(config) -> Report:
-    from sedo_config import ROLES
+    from .config import ROLES
     rep = Report()
     rep.add("", "Конфігурація: " + (", ".join(str(s) for s in config.sources) or "жодного файлу (типові значення)"))
     rep.add("", "Ролі: " + ", ".join(f"{r} → {config.roles[r]}" for r in ROLES if r in config.roles))

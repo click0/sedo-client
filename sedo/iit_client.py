@@ -900,7 +900,7 @@ class IITClient:
 
 def main():
     import argparse
-    from _console import force_utf8_io, read_pin
+    from ._console import force_utf8_io, read_pin
     force_utf8_io()
     parser = argparse.ArgumentParser(description="IIT Agent client")
     parser.add_argument("--discover", action="store_true", help="Find agent and print info")

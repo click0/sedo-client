@@ -9,9 +9,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from _console import module_from_env
-from pkcs11_signer import PKCS11Signer, module_candidates
-from virtual_signer import VirtualSigner
+from sedo._console import module_from_env
+from sedo.pkcs11_signer import PKCS11Signer, module_candidates
+from sedo.virtual_signer import VirtualSigner
 
 
 class TestModuleFromEnv:
@@ -76,26 +76,26 @@ class TestModuleDirs:
 
 class TestCLIs:
     def test_sedo_client_passes_env_module(self, tmp_path, monkeypatch):
-        from sedo_client import main
+        from sedo.client import main
         monkeypatch.chdir(tmp_path)
         monkeypatch.setenv("SEDO_MODULE", r"C:\x\Av337CryptokiD.dll")
         monkeypatch.setattr(sys, "argv", ["sedo-client", "--pin", "1"])
-        with patch("sedo_client.SEDOClient") as cls:
+        with patch("sedo.client.SEDOClient") as cls:
             main()
         assert cls.call_args.kwargs["module_path"] == r"C:\x\Av337CryptokiD.dll"
 
     def test_opensc_cli_accepts_env_module(self, monkeypatch):
-        from opensc_signer import main
+        from sedo.opensc_signer import main
         monkeypatch.setenv("SEDO_MODULE", "m.dll")
         monkeypatch.setattr(sys, "argv", ["opensc_signer", "--list-slots"])
         fake = MagicMock()
         fake.list_slots.return_value = ""
-        with patch("opensc_signer.OpenSCSigner", return_value=fake) as cls:
+        with patch("sedo.opensc_signer.OpenSCSigner", return_value=fake) as cls:
             main()
         assert cls.call_args.kwargs["module_path"] == "m.dll"
 
     def test_opensc_cli_without_module_is_a_usage_error(self, monkeypatch):
-        from opensc_signer import main
+        from sedo.opensc_signer import main
         monkeypatch.delenv("SEDO_MODULE", raising=False)
         monkeypatch.setattr(sys, "argv", ["opensc_signer", "--list-slots"])
         with pytest.raises(SystemExit) as e:

@@ -211,7 +211,7 @@ class TestScan:
         assert c["mech_dword_all_present"] is False
 
     def test_mechanism_ids_in_sync_with_module(self):
-        from mechanism_ids import IIT_MECHANISMS  # conftest puts ROOT on sys.path
+        from sedo.mechanism_ids import IIT_MECHANISMS  # conftest puts ROOT on sys.path
         assert set(inv.IIT_MECHANISM_IDS) == set(IIT_MECHANISMS)
         assert len(inv.IIT_MECHANISM_IDS) == 12
 

@@ -87,8 +87,8 @@ def _verify_accepted(r) -> bool:
 
 # Re-exported for backwards compatibility; the implementation lives in
 # _console.py and is shared by every CLI entry point.
-from _console import force_utf8_io, module_from_env  # noqa: E402
-from sedo_config import (Config, ConfigError, KeyProfile, ROLES, load_config,  # noqa: E402
+from ._console import force_utf8_io, module_from_env  # noqa: E402
+from .config import (Config, ConfigError, KeyProfile, ROLES, load_config,  # noqa: E402
                          redacted, resolve_profile_pin)
 
 
@@ -223,8 +223,8 @@ class SEDOClient:
 
         if name in ("opensc", "auto"):
             try:
-                from opensc_signer import OpenSCSigner
-                from mechanism_ids import detect_dstu4145_mechanism
+                from .opensc_signer import OpenSCSigner
+                from .mechanism_ids import detect_dstu4145_mechanism
                 if module_path is None:
                     raise ValueError("OpenSC backend requires --module path")
                 # The token's own mechanism list decides (no PIN needed);
@@ -249,7 +249,7 @@ class SEDOClient:
 
         if name in ("pkcs11", "auto"):
             try:
-                from pkcs11_signer import PKCS11Signer
+                from .pkcs11_signer import PKCS11Signer
                 signer = PKCS11Signer(module_path, cert_id=cert_id,
                                       mechanism=int(mechanism, 16) if mechanism else None)
                 log.info("Backend: PKCS#11 (PyKCS11 direct)")
@@ -261,7 +261,7 @@ class SEDOClient:
 
         if name in ("virtual", "auto"):
             try:
-                from virtual_signer import VirtualSigner
+                from .virtual_signer import VirtualSigner
                 resolved_key = key_file or self._find_key_file()
                 if name == "virtual" and not resolved_key:
                     raise FileNotFoundError(
@@ -279,7 +279,7 @@ class SEDOClient:
                 log.info("Virtual unavailable (%s), falling back to IIT Agent", e)
 
         # Fallback: IIT Agent JSON-RPC
-        from iit_client import IITClient, IITAgentNotFound
+        from .iit_client import IITClient, IITAgentNotFound
         try:
             client = IITClient.auto_discover(origin=self.sedo_url)
             log.info("Backend: IIT Agent JSON-RPC (%s:%d)", client.host, client.port)
@@ -300,7 +300,7 @@ class SEDOClient:
         the list cannot be read.
         """
         import subprocess
-        from mechanism_ids import choose_sign_mechanism
+        from .mechanism_ids import choose_sign_mechanism
         try:
             mech = choose_sign_mechanism(signer.sign_mechanism_ids())
         except (ValueError, RuntimeError, OSError, subprocess.SubprocessError) as e:
@@ -605,7 +605,7 @@ class IITAgentAdapter:
     def logout(self):
         # Never let teardown raise: a lost agent here would mask the real
         # error raised inside the with-block (see finalize()).
-        from iit_client import IITError
+        from .iit_client import IITError
         try:
             self._c.finalize()
         except IITError as e:
@@ -677,7 +677,7 @@ def main():
         print(json.dumps(redacted(config), ensure_ascii=False, indent=2))
         return
     if args.check:
-        from sedo_check import run_checks
+        from .check import run_checks
         if not args.verbose:          # the report is the output; keep INFO noise out
             logging.getLogger().setLevel(logging.WARNING)
         report = run_checks(config)

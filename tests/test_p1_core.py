@@ -13,20 +13,20 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from iit_client import IITClient, IITRPCError
-from sedo_client import SEDOClient
+from sedo.iit_client import IITClient, IITRPCError
+from sedo.client import SEDOClient
 
 DER = b"\x30\x82\x01\x00" + b"\xab" * 20
 
 
 def _iit():
-    with patch("iit_client.requests.Session"):
+    with patch("sedo.iit_client.requests.Session"):
         return IITClient()
 
 
 def _iit_envelope(body):
     """An IITClient whose transport returns ``body`` as the JSON envelope."""
-    with patch("iit_client.requests.Session") as S:
+    with patch("sedo.iit_client.requests.Session") as S:
         sess = MagicMock()
         S.return_value = sess
         sess.post.return_value = MagicMock(status_code=200, text="", json=lambda: body)
@@ -117,7 +117,7 @@ class TestRpcEnvelope:
 
     def test_signdata_fallback_reachable_with_string_error(self):
         """The regression: a bare-string error made the fallback unreachable."""
-        with patch("iit_client.requests.Session") as S:
+        with patch("sedo.iit_client.requests.Session") as S:
             sess = MagicMock()
             S.return_value = sess
             sess.post.side_effect = [
@@ -150,7 +150,7 @@ class _Signer:
 
 
 def _client(signer=None):
-    with patch("sedo_client.SEDOClient._pick_backend", return_value=signer or _Signer()):
+    with patch("sedo.client.SEDOClient._pick_backend", return_value=signer or _Signer()):
         c = SEDOClient()
     c.session = MagicMock()
     return c
@@ -186,7 +186,7 @@ class TestAuthRobustness:
         c = _client(_Signer(sign_error=RuntimeError("sign failed: CKR_MECHANISM_INVALID")))
         c.session.get.return_value = MagicMock(headers={"Location": ""})
         c.session.post.return_value = _resp(200, {"challenge": "bm9uY2U="})
-        with caplog.at_level(logging.WARNING, logger="sedo_client"):
+        with caplog.at_level(logging.WARNING, logger="sedo.client"):
             with pytest.raises(RuntimeError) as exc:
                 c.authorize("1234")
         assert "CKR_MECHANISM_INVALID" in caplog.text
@@ -197,7 +197,7 @@ class TestAuthRobustness:
         c = _client()
         c.session.get.return_value = MagicMock(headers={"Location": ""})
         c.session.post.return_value = _resp(404, {})
-        with caplog.at_level(logging.WARNING, logger="sedo_client"):
+        with caplog.at_level(logging.WARNING, logger="sedo.client"):
             with pytest.raises(RuntimeError) as exc:
                 c.authorize("1234")
         assert "cms_post" not in caplog.text
@@ -230,11 +230,11 @@ def signer_factory(request, fake_pykcs11, tmp_path):
     """Build either PyKCS11-backed signer against the fake module."""
     def build():
         if request.param == "pkcs11":
-            from pkcs11_signer import PKCS11Signer
+            from sedo.pkcs11_signer import PKCS11Signer
             mod = tmp_path / "PKCS11.EKeyAlmaz1C.dll"
             mod.write_bytes(b"fake")
             return PKCS11Signer(str(mod))
-        from virtual_signer import VirtualSigner
+        from sedo.virtual_signer import VirtualSigner
         mod = tmp_path / "PKCS11.Virtual.EKeyAlmaz1C.dll"
         mod.write_bytes(b"fake")
         return VirtualSigner(module_path=str(mod))
@@ -407,9 +407,9 @@ class TestSessionLifecycle:
 
 class TestOpenSCSignsWithCertId:
     @pytest.mark.parametrize("cert_id", ["01", "02"])
-    @patch("opensc_signer.subprocess.run")
+    @patch("sedo.opensc_signer.subprocess.run")
     def test_sign_passes_the_same_id_as_the_certificate(self, mock_run, tmp_path, cert_id):
-        from opensc_signer import OpenSCSigner
+        from sedo.opensc_signer import OpenSCSigner
         tool = tmp_path / "pkcs11-tool"
         tool.write_bytes(b"fake")
         module = tmp_path / "PKCS11.dll"
