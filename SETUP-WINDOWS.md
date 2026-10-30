@@ -225,7 +225,7 @@ python scripts\fiddler_analyze.py sedo-auth-capture.saz
 
 ## Крок 7: Інтеграція зі СЕДО (1 год)
 
-Після Fiddler capture — оновити `_flow_*` методи в `sedo_client.py`
+Після Fiddler capture — оновити `_flow_*` методи в `sedo/client.py`
 з точними URL і форматом JSON.
 
 ```powershell

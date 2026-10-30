@@ -10,7 +10,7 @@ Year:     2025-2026
 ```
 
 **Мета:** зафіксувати точний flow авторизації на sedo.mod.gov.ua для уточнення 
-sedo_client.py (заповнити TODO у _flow_oidc / _flow_direct_kep / _flow_cms_post).
+sedo/client.py (заповнити TODO у _flow_oidc / _flow_direct_kep / _flow_cms_post).
 
 **Час:** ~30 хвилин однієї ручної сесії входу.
 
@@ -133,11 +133,11 @@ Response: Set-Cookie + 200 OK
 - ...
 ```
 
-Потім оновити `sedo_client.py` — замінити TODO placeholders реальними URL/JSON.
+Потім оновити `sedo/client.py` — замінити TODO placeholders реальними URL/JSON.
 
 ## Фаза 3: Повторний прогон з Python клієнтом
 
-Після оновлення sedo_client.py, запустити з логуванням:
+Після оновлення sedo/client.py, запустити з логуванням:
 
 ```powershell
 python sedo_client.py `
@@ -175,6 +175,6 @@ $env:SSLKEYLOGFILE = "C:\temp\ssl.log"
 Після 30-хв сесії у вас має бути:
 - `sedo_login_reference.saz` — повний захоплений лог
 - `docs/sedo-flow.md` — документація flow
-- Оновлений `sedo_client.py` з правильними URL
+- Оновлений `sedo/client.py` з правильними URL
 
 Це дозволить повністю автоматизувати авторизацію.

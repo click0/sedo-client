@@ -7,6 +7,24 @@ Contact:  github.com/click0
 License:  BSD 3-Clause "New" or "Revised" License
 ```
 
+## v0.34 — unreleased
+
+### Змінено
+
+- **Код переїхав у пакет `sedo/`.** `sedo_client.py` → `sedo/client.py`,
+  `sedo_config.py` → `sedo/config.py`, `sedo_check.py` → `sedo/check.py`,
+  `_console.py`, `iit_client.py`, `opensc_signer.py`, `pkcs11_signer.py`,
+  `virtual_signer.py`, `mechanism_ids.py` — у `sedo/` під тими самими іменами.
+  Поведінка не змінилась: `python sedo_client.py …` (документація, плейбуки
+  Ansible, Wine) запускає ту саму програму, `sedo-client` після `pip install .`
+  і новий `python -m sedo` — теж; `config.toml` / `config_local.toml`
+  шукаються там само (корінь репозиторію, поруч із `.exe`); бінарники
+  PyInstaller збираються з `sedo/__main__.py`.
+- **Старі імена модулів лишились шимами** у корені й у wheel: імпорт
+  `sedo_client`, `iit_client` тощо видає `DeprecationWarning` і повертає сам
+  модуль `sedo.*`, тож і `monkeypatch` через старе ім'я доходить до справжнього
+  модуля. Новий код імпортує `sedo.<модуль>`.
+
 ## v0.33 — 2026-10-28
 
 ### Головне
