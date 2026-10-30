@@ -1,0 +1,433 @@
+"""
+PKCS#11 клієнт через subprocess до OpenSC pkcs11-tool.exe.
+
+Author:   Vladyslav V. Prodan
+Contact:  github.com/click0
+Phone:    +38(099)6053340
+Version:  0.33
+License:  BSD 3-Clause "New" or "Revised" License
+Year:     2025-2026
+"""
+
+import logging
+import re
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path
+from typing import Optional
+
+log = logging.getLogger(__name__)
+
+__all__ = ["OpenSCSigner", "OpenSCNotFound", "parse_sign_mechanisms",
+           "parse_objects", "select_cert_id"]
+
+# One line of `pkcs11-tool --list-mechanisms`. OpenSC prints mechanisms it has
+# no name for as "mechtype-0x<hex>" (p11_mechanism_to_name) — which covers
+# every DSTU 4145 id, IIT vendor-defined and the standard 0x352 alike —
+# followed by comma-separated attributes, one of which is "sign" when CKF_SIGN
+# is set. Verified on a live ST-338 (OpenSC 32-bit, 2026-09):
+#   mechtype-0x80420031, keySize={163,509}, hw, sign, verify, EC F_2M, ...
+# The first version matched "mechanism-0x" — a format made up for the tests —
+# and found nothing in real output. Both spellings are accepted.
+_MECH_LINE_RE = re.compile(r"^\s*mech(?:type|anism)-0x([0-9A-Fa-f]+)\b(.*)$")
+
+
+def parse_sign_mechanisms(lines) -> list[int]:
+    """IDs of the unnamed (vendor / DSTU) mechanisms that carry CKF_SIGN."""
+    out = []
+    for line in lines:
+        m = _MECH_LINE_RE.match(line)
+        if not m:
+            continue
+        flags = {f.strip() for f in m.group(2).split(",")}
+        if "sign" in flags:
+            out.append(int(m.group(1), 16))
+    return out
+
+
+# `pkcs11-tool --list-objects`: an object starts at column 0 ("Private Key
+# Object; EC", "Certificate Object; type = X.509 cert"), its attributes are
+# indented ("  ID:         01", "  Usage:      decrypt, sign, ..."). Verbatim
+# shape from OpenSC 0.25 against SoftHSM2; the Almaz-1K / ST-338 output in
+# SETUP-WINDOWS.md has the same layout.
+_OBJECT_HEADER_RE = re.compile(r"^(Private Key|Public Key|Certificate|Secret Key|Data) Object\b")
+
+
+def parse_objects(text: str) -> list[dict]:
+    """[{kind, label, id, usage}] for every object in `--list-objects` output."""
+    objects: list[dict] = []
+    for line in text.splitlines():
+        m = _OBJECT_HEADER_RE.match(line)
+        if m:
+            objects.append({"kind": m.group(1).lower().replace(" ", "_"),
+                            "label": None, "id": None, "usage": ()})
+            continue
+        if not objects or not line.startswith(" "):
+            continue
+        key, _, value = line.strip().partition(":")
+        value = value.strip()
+        if key == "ID":
+            objects[-1]["id"] = value.lower() or None
+        elif key == "label":
+            objects[-1]["label"] = value
+        elif key == "Usage":
+            objects[-1]["usage"] = tuple(u.strip() for u in value.split(",") if u.strip())
+    return objects
+
+
+def select_cert_id(objects: list[dict], fallback: str = "01") -> str:
+    """
+    CKA_ID to sign with: the id a certificate and a private key SHARE.
+
+    Hard-coding "01" was right for the Almaz-1K and unknown for any other
+    token (ST-338 included). With several pairs — a signing and an encryption
+    pair — the key whose Usage lists "sign" wins; several of those → the
+    LOWEST id, with a warning (never "the first listed": SoftHSM returns
+    objects in varying order, and a real token may too). No pair at all →
+    ``fallback``, with a warning.
+    """
+    keys = [o for o in objects if o["kind"] == "private_key" and o["id"]]
+    cert_ids = {o["id"] for o in objects if o["kind"] == "certificate" and o["id"]}
+    paired = [k for k in keys if k["id"] in cert_ids]
+    if not paired:
+        log.warning("No private key shares a CKA_ID with a certificate "
+                    "(%d keys, %d certificates); using --id %s",
+                    len(keys), len(cert_ids), fallback)
+        return fallback
+    signing = sorted([k for k in paired if "sign" in k["usage"]] or paired,
+                     key=lambda k: k["id"])
+    if len(signing) > 1:
+        log.warning("Several key/certificate pairs can sign (%s); using the lowest "
+                    "id, %s — pass cert_id explicitly to choose another",
+                    ", ".join(k["id"] for k in signing), signing[0]["id"])
+    return signing[0]["id"]
+
+
+class OpenSCNotFound(Exception):
+    """pkcs11-tool.exe не знайдено."""
+
+
+class OpenSCSigner:
+    """
+    Signer через OpenSC pkcs11-tool.exe (subprocess).
+
+    Стандартні шляхи для пошуку:
+    - C:\\Program Files (x86)\\OpenSC Project\\OpenSC\\tools\\pkcs11-tool.exe
+      (32-bit — єдиний, що може завантажити 32-bit DLL ІІТ)
+    - /usr/bin/pkcs11-tool (Linux)
+
+    Приклад:
+        signer = OpenSCSigner(
+            module_path=r"C:\\...\\PKCS11_EKeyAlmaz1C.dll",
+            mechanism="0x80420031"  # IIT DSTU 4145 SIGN (EC F_2M) — CONFIRMED on live token
+        )
+        signer.login("1234")
+        cert = signer.get_certificate()
+        signature = signer.sign(b"data to sign")
+    """
+
+    # pkcs11-tool --sign = C_Sign: a raw DSTU 4145 value, no CMS wrapper.
+    signature_format = "raw"
+
+    # 32-bit first. The IIT/Avest modules are 32-bit PE DLLs; a 64-bit
+    # pkcs11-tool fails on them with "sc_dlopen failed" (SETUP-WINDOWS.md).
+    # SETUP-WINDOWS allows both OpenSC builds side by side, and with the
+    # 64-bit path first auto-detection picked the one that cannot work.
+    DEFAULT_PKCS11_TOOL_PATHS = [
+        r"C:\Program Files (x86)\OpenSC Project\OpenSC\tools\pkcs11-tool.exe",
+        r"C:\Program Files\OpenSC Project\OpenSC\tools\pkcs11-tool.exe",
+        "/usr/bin/pkcs11-tool",
+        "/usr/local/bin/pkcs11-tool",
+    ]
+
+    def __init__(self, module_path: str,
+                 mechanism: str = "0x80420031",
+                 pkcs11_tool: Optional[str] = None,
+                 cert_id: Optional[str] = None):
+        if pkcs11_tool is None:
+            pkcs11_tool = self._find_tool()
+        if not Path(pkcs11_tool).exists():
+            raise OpenSCNotFound(f"pkcs11-tool not found: {pkcs11_tool}")
+
+        self._tool = pkcs11_tool
+        self._module = module_path
+        self._mechanism = mechanism
+        # CKA_ID of the certificate/key pair. None = read it from the token on
+        # first use (select_cert_id over --list-objects); "01" is only the
+        # fallback when no pair is found.
+        self._cert_id = cert_id
+        self._cert_id_explicit = cert_id is not None
+        self._pin: Optional[str] = None
+
+        if not Path(module_path).exists():
+            raise FileNotFoundError(f"PKCS#11 module not found: {module_path}")
+
+        log.info("Using pkcs11-tool: %s", self._tool)
+        log.info("Module: %s", self._module)
+
+    @classmethod
+    def _find_tool(cls) -> str:
+        # Check PATH first
+        tool = shutil.which("pkcs11-tool") or shutil.which("pkcs11-tool.exe")
+        if tool:
+            return tool
+        # Check standard paths
+        for p in cls.DEFAULT_PKCS11_TOOL_PATHS:
+            if Path(p).exists():
+                return p
+        raise OpenSCNotFound(
+            f"pkcs11-tool not found in PATH or standard locations: "
+            f"{cls.DEFAULT_PKCS11_TOOL_PATHS}"
+        )
+
+    def _run(self, args: list, input_data: Optional[bytes] = None,
+             timeout: float = 30.0) -> subprocess.CompletedProcess:
+        """Виклик pkcs11-tool із прапором --module."""
+        cmd = [self._tool, "--module", self._module, *args]
+        safe_cmd = [("***" if i > 0 and cmd[i - 1] == "--pin" else a)
+                    for i, a in enumerate(cmd)]
+        log.debug("$ %s", " ".join(safe_cmd))
+        # TimeoutExpired.__str__ embeds .cmd — the RAW argv, including
+        # "--pin <PIN>". Nothing catches it upstream, so it would be printed at
+        # ERROR level by sedo_client.main(). Keep only the scalars from the
+        # original and re-raise OUTSIDE the except block: raising inside would
+        # attach the original as __context__, and __suppress_context__ merely
+        # stops it being printed — the PIN would still be reachable from the
+        # exception chain.
+        timed_out = None
+        try:
+            result = subprocess.run(cmd, input=input_data, capture_output=True,
+                                    timeout=timeout, check=False)
+        except subprocess.TimeoutExpired as e:
+            timed_out = (e.timeout, e.output, e.stderr)
+        if timed_out is not None:
+            secs, out, err = timed_out
+            raise subprocess.TimeoutExpired(safe_cmd, secs, output=out, stderr=err)
+        if result.stderr:
+            log.debug("stderr: %s", result.stderr.decode("utf-8", errors="replace").rstrip())
+        return result
+
+    # ─── Інформаційні (без PIN) ─────────────────────────────
+
+    def list_slots(self) -> str:
+        """Повертає сирий текст виводу --list-slots."""
+        r = self._run(["--list-slots"])
+        return r.stdout.decode("utf-8", errors="replace")
+
+    def list_mechanisms(self) -> list[str]:
+        """Перелік підтримуваних механізмів."""
+        r = self._run(["--list-mechanisms"])
+        return r.stdout.decode("utf-8", errors="replace").splitlines()
+
+    def sign_mechanism_ids(self) -> list[int]:
+        """
+        Числові ID механізмів з CKF_SIGN (без PIN — жодної спроби не витрачає).
+
+        Лише "mechtype-0x…" рядки: механізми, які OpenSC знає за іменем
+        (RSA, ECDSA…), не є ДСТУ 4145 і тут не потрібні.
+        """
+        r = self._run(["--list-mechanisms"])
+        if r.returncode != 0:
+            stderr = r.stderr.decode("utf-8", errors="replace").strip()
+            raise RuntimeError(f"list-mechanisms failed: {stderr}")
+        return parse_sign_mechanisms(
+            r.stdout.decode("utf-8", errors="replace").splitlines())
+
+    def set_mechanism(self, mechanism: str) -> None:
+        """Змінити механізм підпису (формат як у --mechanism: "0x80420031")."""
+        self._mechanism = mechanism
+
+    def show_info(self) -> str:
+        """Module and token info. (CLI: opensc_signer.py --list-slots)"""
+        r = self._run(["--show-info"])
+        return r.stdout.decode("utf-8", errors="replace")
+
+    # ─── З PIN ──────────────────────────────────────────────
+
+    def login(self, pin: str) -> None:
+        """
+        Зберігає PIN для наступних викликів (не робить SC_Login негайно).
+
+        ⚠️ PIN передається у командному рядку pkcs11-tool — видимий іншим
+        локальним користувачам через список процесів. Для багатокористувацьких
+        Windows-воркерів використовуй backend=iit_agent.
+        """
+        self._pin = pin
+
+    def list_objects(self) -> str:
+        if not self._pin:
+            raise RuntimeError("PIN не встановлено — викликай login() спочатку")
+        r = self._run(["--login", "--pin", self._pin, "--list-objects"])
+        if r.returncode != 0:
+            # Must raise, not return empty: pkcs11-tool does not keep a session
+            # between calls, so every operation performs its own --login. If a
+            # wrong PIN were swallowed here, main() would go on to --get-cert
+            # and --sign and burn 3 of the Almaz-1K's 15 attempts instead of 1.
+            stderr = r.stderr.decode("utf-8", errors="replace").strip()
+            raise RuntimeError(f"list-objects failed: {stderr}")
+        return r.stdout.decode("utf-8", errors="replace")
+
+    def resolve_cert_id(self) -> str:
+        """
+        The CKA_ID used by get_certificate() and sign().
+
+        Determined once per login from `--list-objects` (the same call that
+        validates the PIN, so a wrong PIN costs exactly one attempt here and
+        nothing is signed afterwards). An explicit ``cert_id`` is never
+        overridden.
+        """
+        if self._cert_id is None:
+            self._cert_id = select_cert_id(parse_objects(self.list_objects()))
+            log.info("Using CKA_ID %s (key/certificate pair from the token)", self._cert_id)
+        return self._cert_id
+
+    def get_certificate(self, object_id: Optional[str] = None) -> bytes:
+        """Експорт сертифіката у DER-форматі."""
+        if not self._pin:
+            raise RuntimeError("PIN не встановлено")
+        object_id = object_id or self.resolve_cert_id()
+        # Private (0700) temp dir: no predictable path in a shared /tmp,
+        # so nothing can pre-create/symlink the output file.
+        tmp = tempfile.mkdtemp(prefix="sedo-cert-")
+        out_path = str(Path(tmp) / "cert.der")
+        try:
+            r = self._run([
+                "--login", "--pin", self._pin,
+                "--read-object", "--type", "cert", "--id", object_id,
+                "--output-file", out_path,
+            ])
+            if r.returncode != 0:
+                stderr = r.stderr.decode("utf-8", errors="replace")
+                raise RuntimeError(f"read-object failed: {stderr}")
+            blob = Path(out_path).read_bytes()
+            if not blob:
+                # rc=0 but nothing written — e.g. wrong CKA_ID; don't let an
+                # empty cert flow into authorize() as "0 bytes".
+                raise RuntimeError(
+                    f"pkcs11-tool produced an empty certificate (id={object_id}); "
+                    "check the CKA_ID with --list-objects")
+            return blob
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def sign(self, data: bytes) -> bytes:
+        """Підпис даних через --sign."""
+        if not self._pin:
+            raise RuntimeError("PIN не встановлено")
+
+        # Both input and signature live inside a private (0700) temp dir —
+        # the old `inp_path + ".sig"` was a predictable, non-mkstemp path.
+        tmp = tempfile.mkdtemp(prefix="sedo-sign-")
+        inp_path = str(Path(tmp) / "data.bin")
+        out_path = str(Path(tmp) / "data.sig")
+        try:
+            Path(inp_path).write_bytes(data)
+            # --id selects the private key with the SAME CKA_ID as the
+            # certificate get_certificate() exports. Without it pkcs11-tool
+            # signs with the first private key it finds, so on a token with a
+            # signing and an encryption pair the server got certificate "01"
+            # and a signature made by a different key.
+            r = self._run([
+                "--login", "--pin", self._pin,
+                "--sign", "--mechanism", self._mechanism,
+                "--id", self.resolve_cert_id(),
+                "--input-file", inp_path,
+                "--output-file", out_path,
+            ])
+            if r.returncode != 0:
+                stderr = r.stderr.decode("utf-8", errors="replace")
+                raise RuntimeError(f"sign failed: {stderr}")
+            sig = Path(out_path).read_bytes()
+            if not sig:
+                raise RuntimeError("pkcs11-tool produced an empty signature")
+            return sig
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def logout(self) -> None:
+        """Очистити PIN з пам'яті (і авто-визначений CKA_ID — наступний логін може бути іншим токеном)."""
+        self._pin = None
+        if not self._cert_id_explicit:
+            self._cert_id = None
+
+    def close(self) -> None:
+        """Нічого не тримає між викликами pkcs11-tool — лише logout()."""
+        self.logout()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.logout()
+        return False
+
+
+# ═══════════════════════════════════════════════════════════════
+
+def main():
+    import argparse
+    from ._console import force_utf8_io, module_from_env, read_pin
+    force_utf8_io()
+    parser = argparse.ArgumentParser(description="OpenSC pkcs11-tool wrapper")
+    parser.add_argument("--module", help="PKCS#11 DLL (or $SEDO_MODULE)")
+    parser.add_argument("--mechanism", default="0x80420031")
+    parser.add_argument("--pkcs11-tool", help="Path to pkcs11-tool.exe")
+    parser.add_argument("--list-slots", action="store_true")
+    parser.add_argument("--list-mechanisms", action="store_true")
+    parser.add_argument("--pin", help="Token PIN (or $SEDO_PIN, or the prompt)")
+    parser.add_argument("--list-objects", action="store_true")
+    parser.add_argument("--get-cert", action="store_true")
+    parser.add_argument("--sign", help="File to sign")
+    parser.add_argument("--output", help="Output signature path")
+    parser.add_argument("-v", "--verbose", action="store_true")
+    args = parser.parse_args()
+
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s"
+    )
+
+    args.module = module_from_env(args.module)
+    if not args.module:
+        parser.error("--module or $SEDO_MODULE is required")
+
+    signer = OpenSCSigner(
+        module_path=args.module,
+        mechanism=args.mechanism,
+        pkcs11_tool=args.pkcs11_tool,
+    )
+
+    if args.list_slots:
+        print(signer.list_slots())
+    if args.list_mechanisms:
+        for line in signer.list_mechanisms():
+            print(f"  {line}")
+
+    # B6: previously --list-objects/--get-cert/--sign silently did nothing
+    # without --pin. Prompt interactively (same as pkcs11_signer.main).
+    needs_pin = bool(args.list_objects or args.get_cert or args.sign)
+    if needs_pin:
+        # --pin → $SEDO_PIN → prompt; an empty answer exits with an error
+        # instead of silently skipping --sign/--get-cert with exit code 0.
+        args.pin = read_pin(args.pin)
+        signer.login(args.pin)
+
+        if args.list_objects:
+            print(signer.list_objects())
+
+        if args.get_cert:
+            cert = signer.get_certificate()
+            Path("almaz-cert.der").write_bytes(cert)
+            print(f"✓ Cert: almaz-cert.der ({len(cert)} bytes)")
+
+        if args.sign:
+            data = Path(args.sign).read_bytes()
+            sig = signer.sign(data)
+            out = args.output or args.sign + ".sig"
+            Path(out).write_bytes(sig)
+            print(f"✓ Signature: {out} ({len(sig)} bytes)")
+
+
+if __name__ == "__main__":
+    main()

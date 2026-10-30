@@ -39,21 +39,21 @@ def t_requests():
     return f"requests {requests.__version__}"
 
 
-@test("iit_client importable")
+@test("sedo.iit_client importable")
 def t_iit():
-    from iit_client import IITClient  # noqa
+    from sedo.iit_client import IITClient  # noqa
     return "OK"
 
 
-@test("pkcs11_signer importable")
+@test("sedo.pkcs11_signer importable")
 def t_pkcs11():
-    from pkcs11_signer import PKCS11Signer  # noqa
+    from sedo.pkcs11_signer import PKCS11Signer  # noqa
     return "OK"
 
 
-@test("sedo_client importable")
+@test("sedo.client importable")
 def t_sedo():
-    from sedo_client import SEDOClient  # noqa
+    from sedo.client import SEDOClient  # noqa
     return "OK"
 
 
@@ -71,7 +71,7 @@ def t_scardsvr():
 
 @test("PKCS11_EKeyAlmaz1C.dll findable")
 def t_dll():
-    from pkcs11_signer import PKCS11Signer
+    from sedo.pkcs11_signer import PKCS11Signer
     try:
         path = PKCS11Signer._find_module()
         size = Path(path).stat().st_size
@@ -102,7 +102,7 @@ def t_reg():
 
 def main():
     # UTF-8 stdout/stderr so emoji (✓ ✗ ⚠) don't crash on Windows cp1251/cp866.
-    from _console import force_utf8_io
+    from sedo._console import force_utf8_io
     force_utf8_io()
 
     passed = failed = 0

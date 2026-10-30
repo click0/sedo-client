@@ -43,8 +43,9 @@ def test_repository_is_consistent():
 
 def test_every_python_module_carries_a_header():
     headers = cv.version_headers(ROOT)
-    for mod in ("sedo_client.py", "iit_client.py", "opensc_signer.py", "pkcs11_signer.py",
-                "virtual_signer.py", "mechanism_ids.py", "_console.py",
+    for mod in ("sedo/client.py", "sedo/iit_client.py", "sedo/opensc_signer.py",
+                "sedo/pkcs11_signer.py", "sedo/virtual_signer.py", "sedo/mechanism_ids.py",
+                "sedo/_console.py", "sedo/config.py", "sedo/check.py",
                 "opensc-test-almaz.ps1"):
         assert mod in headers, mod
 

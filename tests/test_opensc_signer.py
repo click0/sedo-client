@@ -10,7 +10,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-from opensc_signer import OpenSCSigner, OpenSCNotFound
+from sedo.opensc_signer import OpenSCSigner, OpenSCNotFound
 
 
 class TestFindTool:
@@ -99,7 +99,7 @@ class TestRun:
         return OpenSCSigner(module_path=str(module),
                             pkcs11_tool=str(tool), cert_id="01")
 
-    @patch("opensc_signer.subprocess.run")
+    @patch("sedo.opensc_signer.subprocess.run")
     def test_run_passes_module(self, mock_run, tmp_path):
         signer = self._make_signer(tmp_path)
         mock_run.return_value = subprocess.CompletedProcess(
@@ -111,7 +111,7 @@ class TestRun:
         assert str(tmp_path / "PKCS11.dll") in cmd
         assert "--list-slots" in cmd
 
-    @patch("opensc_signer.subprocess.run")
+    @patch("sedo.opensc_signer.subprocess.run")
     def test_list_mechanisms(self, mock_run, tmp_path):
         signer = self._make_signer(tmp_path)
         mock_run.return_value = subprocess.CompletedProcess(
@@ -122,7 +122,7 @@ class TestRun:
         assert len(mechs) == 2
         assert "0x80420031" in mechs[0]
 
-    @patch("opensc_signer.subprocess.run")
+    @patch("sedo.opensc_signer.subprocess.run")
     def test_sign_creates_temp_files(self, mock_run, tmp_path):
         signer = self._make_signer(tmp_path)
         signer.login("1234")
@@ -140,7 +140,7 @@ class TestRun:
         sig = signer.sign(b"test data")
         assert len(sig) == 64
 
-    @patch("opensc_signer.subprocess.run")
+    @patch("sedo.opensc_signer.subprocess.run")
     def test_sign_raises_on_failure(self, mock_run, tmp_path):
         signer = self._make_signer(tmp_path)
         signer.login("1234")
@@ -150,7 +150,7 @@ class TestRun:
         with pytest.raises(RuntimeError, match="sign failed"):
             signer.sign(b"test data")
 
-    @patch("opensc_signer.subprocess.run")
+    @patch("sedo.opensc_signer.subprocess.run")
     def test_get_certificate_reads_output(self, mock_run, tmp_path):
         signer = self._make_signer(tmp_path)
         signer.login("1234")

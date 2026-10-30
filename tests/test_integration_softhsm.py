@@ -135,7 +135,7 @@ def token(tmp_path_factory):
 
 class TestOpenSC:
     def _signer(self, token, **kw):
-        from opensc_signer import OpenSCSigner
+        from sedo.opensc_signer import OpenSCSigner
         return OpenSCSigner(module_path=token.module, pkcs11_tool=TOOL,
                             mechanism="ECDSA", **kw)
 
@@ -171,7 +171,7 @@ class TestOpenSC:
         pairs can sign, so the lowest id (01) wins with a warning — and the
         signature really comes from key 01.
         """
-        from opensc_signer import OpenSCSigner
+        from sedo.opensc_signer import OpenSCSigner
         s = OpenSCSigner(module_path=token.module, pkcs11_tool=TOOL, mechanism="ECDSA")
         s.login(PIN)
         assert s.resolve_cert_id() == "01"
@@ -220,7 +220,7 @@ pykcs11 = pytest.importorskip("PyKCS11", reason="pip install .[pkcs11]")
 
 class TestPyKCS11:
     def _signer(self, token):
-        from pkcs11_signer import PKCS11Signer
+        from sedo.pkcs11_signer import PKCS11Signer
         return PKCS11Signer(token.module)
 
     def test_real_mechanism_list(self, token):
@@ -288,7 +288,7 @@ class TestPyKCS11:
             s2.close()
 
     def test_virtual_signer_on_the_same_library(self, token):
-        from virtual_signer import VirtualSigner
+        from sedo.virtual_signer import VirtualSigner
         v = VirtualSigner(module_path=token.module)
         try:
             v.login(PIN)
@@ -368,7 +368,7 @@ def sedo(token, tmp_path):
 
 class TestEndToEnd:
     def test_opensc_backend_authorizes(self, token, sedo):
-        from sedo_client import SEDOClient
+        from sedo.client import SEDOClient
         srv = sedo("01")
         with SEDOClient(sedo_url=srv.url, backend="opensc", module_path=token.module) as c:
             c.signer.set_mechanism("ECDSA")           # SoftHSM has no DSTU 4145
@@ -377,7 +377,7 @@ class TestEndToEnd:
         assert srv.verify_calls[0]["session_id"] == "s1"
 
     def test_pkcs11_backend_authorizes(self, token, sedo):
-        from sedo_client import SEDOClient
+        from sedo.client import SEDOClient
         with SEDOClient(sedo_url="http://127.0.0.1:1", backend="pkcs11",
                         module_path=token.module) as c:
             c.signer.login(PIN)
@@ -391,7 +391,7 @@ class TestEndToEnd:
 
     def test_server_rejection_is_not_reported_as_success(self, token, sedo):
         """Certificate 01 signed by key 02: the server says no, so must we."""
-        from sedo_client import SEDOClient
+        from sedo.client import SEDOClient
         srv = sedo("02")                      # expects key/cert 02
         with SEDOClient(sedo_url=srv.url, backend="opensc", module_path=token.module) as c:
             c.signer.set_mechanism("ECDSA")   # cert_id stays "01"
@@ -410,8 +410,8 @@ class TestProfiles:
         `doc` (cert 02, pkcs11) signs the document — and each signature
         verifies only with its own public key.
         """
-        import sedo_config as sc
-        from sedo_client import SEDOClient
+        from sedo import config as sc
+        from sedo.client import SEDOClient
         (tmp_path / "config.toml").write_text(
             "[keys.login]\nbackend = 'opensc'\ncert_id = '01'\nmechanism = '0x1041'\n"
             "[keys.doc]\nbackend = 'pkcs11'\ncert_id = '02'\nmechanism = '0x1041'\n"

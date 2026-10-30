@@ -151,7 +151,7 @@ Authentication error (authentication data corrupted)
 9. Sign(b64_data, {internal: true})
       → "<base64 CMS SignedData>"
       // у таблиці методів EUSignRPC 1.3.1.109 є "Sign", "SignHash", "SignFile",
-      // "SignInternal" — методу "SignData" немає; iit_client пробує "Sign",
+      // "SignInternal" — методу "SignData" немає; sedo.iit_client пробує "Sign",
       // а на -32601 (method not found) — "SignData" для старих агентів
 
 10. ResetPrivateKey()
@@ -209,7 +209,7 @@ RPC-метод = експорт `EUSignCP` без префікса `EU` і бе�
   `GetReceiversCertificates()`
 
 ### Підпис (8 + Ctx/Raw/Append)
-- **`Sign(b64_data, options)`** → base64 CMS — те, що викликає `iit_client.sign_data`
+- **`Sign(b64_data, options)`** → base64 CMS — те, що викликає `sedo.iit_client` (`IITClient.sign_data`)
 - `SignHash(b64_hash)`, `SignFile(path)`, `SignInternal()`,
   `SignRSA()`, `SignHashRSA()`, `SignRSAFile()`, `SignECDSA()`
 - потокові: `ContinueSign()`, `EndSign()` (+ `*Ctx`, `*RSA*`)

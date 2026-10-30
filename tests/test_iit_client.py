@@ -10,8 +10,8 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
-import iit_client
-from iit_client import IITClient, IITRPCError, IITAgentNotFound
+from sedo import iit_client
+from sedo.iit_client import IITClient, IITRPCError, IITAgentNotFound
 
 
 class TestRegistryReading:
@@ -27,7 +27,7 @@ class TestRegistryReading:
 class TestJSONRPCProtocol:
     """Перевірка формату запитів/відповідей."""
 
-    @patch("iit_client.requests.Session")
+    @patch("sedo.iit_client.requests.Session")
     def test_call_builds_correct_jsonrpc_envelope(self, mock_session_cls):
         """Перевіряє що клієнт формує правильний JSON-RPC 2.0 request."""
         mock_session = MagicMock()
@@ -52,7 +52,7 @@ class TestJSONRPCProtocol:
             "params": [],
         }
 
-    @patch("iit_client.requests.Session")
+    @patch("sedo.iit_client.requests.Session")
     def test_call_with_session_id(self, mock_session_cls):
         """Session_id додається в наступні виклики."""
         mock_session = MagicMock()
@@ -69,7 +69,7 @@ class TestJSONRPCProtocol:
         payload = mock_session.post.call_args.kwargs["json"]
         assert payload["session_id"] == "test-session-123"
 
-    @patch("iit_client.requests.Session")
+    @patch("sedo.iit_client.requests.Session")
     def test_session_id_captured_from_response(self, mock_session_cls):
         """session_id from agent response is stored and sent in next call."""
         mock_session = MagicMock()
@@ -90,7 +90,7 @@ class TestJSONRPCProtocol:
         payload = mock_session.post.call_args.kwargs["json"]
         assert payload["session_id"] == "agent-sid-42"
 
-    @patch("iit_client.requests.Session")
+    @patch("sedo.iit_client.requests.Session")
     def test_rpc_error_raises(self, mock_session_cls):
         """RPC error → IITRPCError."""
         mock_session = MagicMock()
@@ -108,7 +108,7 @@ class TestJSONRPCProtocol:
         assert exc.value.code == -32601
         assert "not found" in exc.value.message
 
-    @patch("iit_client.requests.Session")
+    @patch("sedo.iit_client.requests.Session")
     def test_http_error_raises(self, mock_session_cls):
         """HTTP non-200 → IITRPCError."""
         mock_session = MagicMock()
@@ -120,7 +120,7 @@ class TestJSONRPCProtocol:
         with pytest.raises(IITRPCError):
             client.call("Initialize")
 
-    @patch("iit_client.requests.Session")
+    @patch("sedo.iit_client.requests.Session")
     def test_connection_error_raises_agent_not_found(self, mock_session_cls):
         import requests
         mock_session = MagicMock()
@@ -134,7 +134,7 @@ class TestJSONRPCProtocol:
 class TestRPCIDIncrement:
     """id має інкрементуватися."""
 
-    @patch("iit_client.requests.Session")
+    @patch("sedo.iit_client.requests.Session")
     def test_rpc_id_increments(self, mock_session_cls):
         mock_session = MagicMock()
         mock_session_cls.return_value = mock_session
@@ -149,7 +149,7 @@ class TestRPCIDIncrement:
 
 
 class TestContextManager:
-    @patch("iit_client.requests.Session")
+    @patch("sedo.iit_client.requests.Session")
     def test_context_manager_calls_initialize_and_finalize(self, mock_session_cls):
         mock_session = MagicMock()
         mock_session_cls.return_value = mock_session
@@ -171,7 +171,7 @@ class TestContextManager:
 
 
 class TestHeaders:
-    @patch("iit_client.requests.Session")
+    @patch("sedo.iit_client.requests.Session")
     def test_origin_header_set(self, mock_session_cls):
         """Origin header має бути встановлений для CORS."""
         mock_session = MagicMock()
@@ -188,7 +188,7 @@ class TestPKCS11SignerModuleDiscovery:
 
     def test_find_module_no_dll(self, tmp_path, monkeypatch):
         """Якщо DLL відсутня, _find_module кидає FileNotFoundError."""
-        from pkcs11_signer import PKCS11Signer
+        from sedo.pkcs11_signer import PKCS11Signer
         # Set empty search paths
         monkeypatch.setattr(PKCS11Signer, "DEFAULT_MODULE_PATHS",
                             [str(tmp_path / "nonexistent.dll")])
@@ -197,7 +197,7 @@ class TestPKCS11SignerModuleDiscovery:
 
     def test_find_module_found(self, tmp_path, monkeypatch):
         """Знаходить DLL у списку кандидатів."""
-        from pkcs11_signer import PKCS11Signer
+        from sedo.pkcs11_signer import PKCS11Signer
         fake = tmp_path / "PKCS11_EKeyAlmaz1C.dll"
         fake.write_bytes(b"fake DLL content")
         monkeypatch.setattr(PKCS11Signer, "DEFAULT_MODULE_PATHS",
@@ -209,7 +209,7 @@ class TestSEDOClientURL:
     """Перевіряє що використовується sedo.mod.gov.ua, не старий URL."""
 
     def test_default_url_is_mod_gov_ua(self):
-        from sedo_client import SEDO_MOD_URL
+        from sedo.client import SEDO_MOD_URL
         assert SEDO_MOD_URL == "https://sedo.mod.gov.ua"
 
     def test_agent_origin_header_is_the_sedo_url(self):
@@ -218,17 +218,17 @@ class TestSEDOClientURL:
         SEDOClient itself sends no Origin; it hands its URL to the agent client
         (auto_discover(origin=…)), which puts it on every JSON-RPC request.
         """
-        from sedo_client import SEDOClient
+        from sedo.client import SEDOClient
         built = {}
 
         def fake_discover(**kwargs):
             built["client"] = IITClient(port=8081, **kwargs)
             return built["client"]
 
-        with patch("iit_client.IITClient.auto_discover", side_effect=fake_discover):
+        with patch("sedo.iit_client.IITClient.auto_discover", side_effect=fake_discover):
             SEDOClient(sedo_url="https://sedo.mod.gov.ua/", backend="iit_agent")
         assert built["client"].session.headers["Origin"] == "https://sedo.mod.gov.ua"
 
     def test_iit_client_default_origin(self):
-        from sedo_client import SEDO_MOD_URL
+        from sedo.client import SEDO_MOD_URL
         assert IITClient().session.headers["Origin"] == SEDO_MOD_URL

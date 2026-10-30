@@ -26,7 +26,7 @@ analysis = ["pefile>=2024.8.26"]
 all = ["PyKCS11>=1.5.15", "pytest>=7.4", "pefile>=2024.8.26"]
 
 [project.scripts]
-sedo-client = "sedo_client:main"
+sedo-client = "sedo.client:main"
 
 [project.urls]
 Homepage = "https://github.com/click0/sedo-client"
@@ -38,6 +38,10 @@ testpaths = ["tests"]
 addopts = "-v --tb=short"
 
 [tool.setuptools]
+packages = ["sedo"]
+# The top-level names of earlier versions, as compatibility shims (each warns
+# and hands back its sedo.* module), so `from sedo_client import SEDOClient`
+# still works in an installed copy.
 py-modules = [
     "_console",
     "sedo_config",

@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from sedo_client import SEDOClient, IITAgentAdapter, KEY_FILE_SEARCH_PATHS
+from sedo.client import SEDOClient, IITAgentAdapter, KEY_FILE_SEARCH_PATHS
 
 
 # ─── Helpers ────────────────────────────────────────────────
@@ -47,7 +47,7 @@ class TestPickBackend:
     def test_auto_returns_signer(self):
         """auto backend returns exactly the object _pick_backend resolves."""
         signer = FakeSigner()
-        with patch("sedo_client.SEDOClient._pick_backend",
+        with patch("sedo.client.SEDOClient._pick_backend",
                    return_value=signer) as pick:
             client = SEDOClient(backend="auto")
         assert client.signer is signer
@@ -72,8 +72,8 @@ class TestPickBackend:
     def test_explicit_iit_agent_raises_without_agent(self):
         """iit_agent raises if agent not running — with discovery mocked, so
         the test never probes real localhost ports."""
-        with patch("iit_client.discover_agent", return_value=None) as disc, \
-             patch("iit_client.probe_port") as probe:
+        with patch("sedo.iit_client.discover_agent", return_value=None) as disc, \
+             patch("sedo.iit_client.probe_port") as probe:
             with pytest.raises(RuntimeError, match="No working backend"):
                 SEDOClient(backend="iit_agent")
         disc.assert_called_once()
@@ -84,7 +84,7 @@ class TestPickBackend:
 
 class TestFindKeyFile:
     def test_returns_none_when_no_files(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("sedo_client.KEY_FILE_SEARCH_PATHS",
+        monkeypatch.setattr("sedo.client.KEY_FILE_SEARCH_PATHS",
                             [tmp_path / "nope" / "Key-6.dat"])
         monkeypatch.delenv("WINEPREFIX", raising=False)
         assert SEDOClient._find_key_file() is None
@@ -92,7 +92,7 @@ class TestFindKeyFile:
     def test_finds_file_in_search_path(self, tmp_path, monkeypatch):
         key = tmp_path / "Key-6.dat"
         key.write_bytes(b"fake key data")
-        monkeypatch.setattr("sedo_client.KEY_FILE_SEARCH_PATHS", [key])
+        monkeypatch.setattr("sedo.client.KEY_FILE_SEARCH_PATHS", [key])
         monkeypatch.delenv("WINEPREFIX", raising=False)
         assert SEDOClient._find_key_file() == str(key)
 
@@ -101,7 +101,7 @@ class TestFindKeyFile:
         sedo_libs.mkdir(parents=True)
         key = sedo_libs / "Key-6.dat"
         key.write_bytes(b"fake key data")
-        monkeypatch.setattr("sedo_client.KEY_FILE_SEARCH_PATHS", [])
+        monkeypatch.setattr("sedo.client.KEY_FILE_SEARCH_PATHS", [])
         monkeypatch.setenv("WINEPREFIX", str(tmp_path))
         assert SEDOClient._find_key_file() == str(key)
 
@@ -116,7 +116,7 @@ class TestFindKeyFile:
         local_key.parent.mkdir()
         local_key.write_bytes(b"local key")
 
-        monkeypatch.setattr("sedo_client.KEY_FILE_SEARCH_PATHS", [local_key])
+        monkeypatch.setattr("sedo.client.KEY_FILE_SEARCH_PATHS", [local_key])
         monkeypatch.setenv("WINEPREFIX", str(tmp_path))
         assert SEDOClient._find_key_file() == str(wine_key)
 
@@ -197,7 +197,7 @@ class TestSEDOClientContextManager:
     def test_exit_calls_logout(self):
         signer = FakeSigner()
         signer.logged_in = True
-        with patch("sedo_client.SEDOClient._pick_backend", return_value=signer):
+        with patch("sedo.client.SEDOClient._pick_backend", return_value=signer):
             with SEDOClient() as client:
                 assert client.signer is signer
         assert not signer.logged_in
@@ -206,7 +206,7 @@ class TestSEDOClientContextManager:
         """HTTP session is closed even if signer.logout() throws."""
         signer = FakeSigner()
         signer.logout = MagicMock(side_effect=RuntimeError("boom"))
-        with patch("sedo_client.SEDOClient._pick_backend", return_value=signer):
+        with patch("sedo.client.SEDOClient._pick_backend", return_value=signer):
             client = SEDOClient()
         client.session = MagicMock()
         with pytest.raises(RuntimeError, match="boom"):
@@ -229,7 +229,7 @@ class TestOpenSCMechanismSelection:
             signer.set_mechanism = lambda m: captured.update(mechanism=m)
             return signer
 
-        with patch("opensc_signer.OpenSCSigner", side_effect=fake_signer):
+        with patch("sedo.opensc_signer.OpenSCSigner", side_effect=fake_signer):
             SEDOClient(backend="opensc", module_path=module_path)
         return captured
 
@@ -250,7 +250,7 @@ class TestOpenSCMechanismSelection:
 
 def _make_client(url="https://sedo.mod.gov.ua"):
     signer = FakeSigner()
-    with patch("sedo_client.SEDOClient._pick_backend", return_value=signer):
+    with patch("sedo.client.SEDOClient._pick_backend", return_value=signer):
         client = SEDOClient(sedo_url=url)
     client.session = MagicMock()
     return client, signer
@@ -390,7 +390,7 @@ class TestForceUtf8IO:
     def test_emoji_print_survives_cp1251(self, monkeypatch):
         """force_utf8_io makes emoji printable on a cp1251 console."""
         import io
-        from sedo_client import force_utf8_io
+        from sedo.client import force_utf8_io
 
         fake_out = io.TextIOWrapper(io.BytesIO(), encoding="cp1251")
         fake_err = io.TextIOWrapper(io.BytesIO(), encoding="cp1251")
@@ -404,7 +404,7 @@ class TestForceUtf8IO:
 
     def test_no_crash_on_non_reconfigurable_stream(self, monkeypatch):
         """Streams without reconfigure() are skipped silently."""
-        from sedo_client import force_utf8_io
+        from sedo.client import force_utf8_io
 
         class Dummy:
             pass

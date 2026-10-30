@@ -9,9 +9,9 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
-import iit_client
-from iit_client import IITClient, IITRPCError, FALLBACK_PORTS, discover_agent
-from mechanism_ids import pick_sign_mechanism
+from sedo import iit_client
+from sedo.iit_client import IITClient, IITRPCError, FALLBACK_PORTS, discover_agent
+from sedo.mechanism_ids import pick_sign_mechanism
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -26,9 +26,9 @@ class TestDiscoverAgent:
     """
 
     def test_registry_http_port_wins(self):
-        with patch("iit_client.read_port_from_registry", return_value=(8081, 8083)), \
-             patch("iit_client.probe_port", return_value=True) as probe, \
-             patch("iit_client.verify_agent", return_value=True) as ver:
+        with patch("sedo.iit_client.read_port_from_registry", return_value=(8081, 8083)), \
+             patch("sedo.iit_client.probe_port", return_value=True) as probe, \
+             patch("sedo.iit_client.verify_agent", return_value=True) as ver:
             assert discover_agent() == ("127.0.0.1", 8081, False)
         probe.assert_called_once_with("127.0.0.1", 8081, use_https=False)
         ver.assert_called_once_with("127.0.0.1", 8081, use_https=False)
@@ -36,18 +36,18 @@ class TestDiscoverAgent:
     def test_registry_https_port_when_http_dead(self):
         def probe(host, port, use_https=False, **kw):
             return use_https and port == 8083
-        with patch("iit_client.read_port_from_registry", return_value=(8081, 8083)), \
-             patch("iit_client.probe_port", side_effect=probe), \
-             patch("iit_client.verify_agent", return_value=True):
+        with patch("sedo.iit_client.read_port_from_registry", return_value=(8081, 8083)), \
+             patch("sedo.iit_client.probe_port", side_effect=probe), \
+             patch("sedo.iit_client.verify_agent", return_value=True):
             assert discover_agent() == ("127.0.0.1", 8083, True)
 
     def test_fallback_tries_http_then_https_per_port(self):
         """Regression for v0.28: the HTTPS fallback probe used to be dead."""
         def probe(host, port, use_https=False, **kw):
             return use_https and port == 8083
-        with patch("iit_client.read_port_from_registry", return_value=(None, None)), \
-             patch("iit_client.probe_port", side_effect=probe) as p, \
-             patch("iit_client.verify_agent", return_value=True):
+        with patch("sedo.iit_client.read_port_from_registry", return_value=(None, None)), \
+             patch("sedo.iit_client.probe_port", side_effect=probe) as p, \
+             patch("sedo.iit_client.verify_agent", return_value=True):
             assert discover_agent() == ("127.0.0.1", 8083, True)
         # 8081 http, 8081 https, 8083 http, 8083 https — in that order
         assert p.call_args_list[:4] == [
@@ -58,18 +58,18 @@ class TestDiscoverAgent:
         ]
 
     def test_nothing_found_returns_none(self):
-        with patch("iit_client.read_port_from_registry", return_value=(None, None)), \
-             patch("iit_client.probe_port", return_value=False) as p:
+        with patch("sedo.iit_client.read_port_from_registry", return_value=(None, None)), \
+             patch("sedo.iit_client.probe_port", return_value=False) as p:
             assert discover_agent() is None
         assert p.call_count == 2 * len(FALLBACK_PORTS)
 
     def test_auto_discover_raises_agent_not_found(self):
-        with patch("iit_client.discover_agent", return_value=None):
+        with patch("sedo.iit_client.discover_agent", return_value=None):
             with pytest.raises(iit_client.IITAgentNotFound):
                 IITClient.auto_discover()
 
     def test_auto_discover_builds_client(self):
-        with patch("iit_client.discover_agent", return_value=("127.0.0.1", 8083, True)):
+        with patch("sedo.iit_client.discover_agent", return_value=("127.0.0.1", 8083, True)):
             c = IITClient.auto_discover(origin="https://x")
         assert (c.host, c.port) == ("127.0.0.1", 8083)
         assert c.base_url.startswith("https://")
@@ -143,33 +143,33 @@ class TestPickSignMechanism:
 
 class TestConsoleHelper:
     def test_sedo_client_reexports_same_function(self):
-        import _console
-        import sedo_client
+        from sedo import _console
+        from sedo import client as sedo_client
         assert sedo_client.force_utf8_io is _console.force_utf8_io
 
     @pytest.mark.parametrize("module", [
-        "sedo_client.py", "opensc_signer.py", "pkcs11_signer.py",
-        "iit_client.py", "virtual_signer.py", "mechanism_ids.py",
+        "sedo/client.py", "sedo/opensc_signer.py", "sedo/pkcs11_signer.py",
+        "sedo/iit_client.py", "sedo/virtual_signer.py", "sedo/mechanism_ids.py",
         "scripts/smoke_test.py", "scripts/iit_inventory.py",
         "scripts/fiddler_analyze.py", "scripts/build_binary.py",
     ])
     def test_no_inline_reconfigure_loops(self, module):
-        """Only _console.py may call stream.reconfigure — no more copies."""
+        """Only sedo/_console.py may call stream.reconfigure — no more copies."""
         assert "reconfigure(" not in (ROOT / module).read_text(encoding="utf-8")
 
     def test_opensc_main_calls_helper(self, monkeypatch):
         import sys
-        from opensc_signer import main
+        from sedo.opensc_signer import main
         monkeypatch.setattr(sys, "argv", ["x", "--module", "m.dll", "--list-slots"])
         fake = MagicMock()
         fake.list_slots.return_value = ""
-        with patch("opensc_signer.OpenSCSigner", return_value=fake), \
-             patch("_console.force_utf8_io") as f:
+        with patch("sedo.opensc_signer.OpenSCSigner", return_value=fake), \
+             patch("sedo._console.force_utf8_io") as f:
             main()
         f.assert_called_once()
 
     def test_helper_survives_streams_without_reconfigure(self, monkeypatch):
-        from _console import force_utf8_io
+        from sedo._console import force_utf8_io
 
         class Dummy:
             pass

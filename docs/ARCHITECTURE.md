@@ -21,21 +21,21 @@ Windows worker
     │
     ├── Python Runtime (3.11–3.13)
     │       ↓
-    │   sedo_client.py — бізнес-логіка СЕДО
+    │   sedo/client.py — бізнес-логіка СЕДО
     │       ↓
     │   [backend вибирається авто або явно]
     │       │
-    │       ├── opensc_signer.py ─── subprocess ─▶ pkcs11-tool.exe (32-bit OpenSC)
+    │       ├── sedo/opensc_signer.py ─── subprocess ─▶ pkcs11-tool.exe (32-bit OpenSC)
     │       │                                          ↓
     │       │                                     --module PKCS11.EKeyAlmaz1C.dll
     │       │
-    │       ├── pkcs11_signer.py ─── PyKCS11 (ctypes) ──▶ PKCS11.EKeyAlmaz1C.dll
+    │       ├── sedo/pkcs11_signer.py ─── PyKCS11 (ctypes) ──▶ PKCS11.EKeyAlmaz1C.dll
     │       │
-    │       ├── virtual_signer.py ── PyKCS11 (ctypes) ──▶ PKCS11.Virtual.EKeyAlmaz1C.dll
+    │       ├── sedo/virtual_signer.py ── PyKCS11 (ctypes) ──▶ PKCS11.Virtual.EKeyAlmaz1C.dll
     │       │                                              ↓ (без USB; Linux/Wine — див.
     │       │                                          Key-6.dat   docs/LINUX-WINE-DEPLOYMENT.md)
     │       │
-    │       └── iit_client.py ─── HTTP POST ──▶ http://127.0.0.1:8081/json-rpc
+    │       └── sedo/iit_client.py ─── HTTP POST ──▶ http://127.0.0.1:8081/json-rpc
     │                                                ↓
     │                                           EUSignAgent.exe (GUI Користувач ЦСК)
     │                                                ↓
@@ -83,8 +83,8 @@ Windows worker
 | Компонент | Роль |
 |---|---|
 | WinRM HTTPS | Приймає команди від Ansible |
-| Python 3.11–3.13 | Виконує sedo_client.py |
-| sedo_client | Бізнес-логіка: login, fetch, завантаження |
+| Python 3.11–3.13 | Виконує sedo_client.py (точка запуску; код — пакет sedo/) |
+| sedo.client | Бізнес-логіка: login, fetch, завантаження |
 | 32-bit OpenSC | pkcs11-tool (основний шлях через subprocess) |
 | IIT бібліотеки | PKCS11 модуль + криптографія |
 | Алмаз-1К USB | Приватний ключ оператора |
@@ -112,7 +112,7 @@ Windows worker
 
 ## Вибір backend
 
-Логіка `sedo_client.py::_pick_backend()`:
+Логіка `sedo/client.py::_pick_backend()`:
 
 ```
 якщо --backend=auto (або не вказано):

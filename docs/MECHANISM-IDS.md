@@ -107,7 +107,7 @@ pkcs11-tool.exe --module "...\PKCS11.EKeyAlmaz1C.dll" `
 
 ```python
 import PyKCS11
-from mechanism_ids import CKM_IIT_DSTU4145  # = 0x80420031
+from sedo.mechanism_ids import CKM_IIT_DSTU4145  # = 0x80420031
 
 lib = PyKCS11.PyKCS11Lib()
 lib.load(r"C:\...\PKCS11.EKeyAlmaz1C.dll")
@@ -122,7 +122,7 @@ signature = session.sign(key, data_bytes, mech)
 ### Python через OpenSC subprocess
 
 ```python
-from opensc_signer import OpenSCSigner
+from sedo.opensc_signer import OpenSCSigner
 
 signer = OpenSCSigner(
     module_path=r"C:\...\PKCS11.EKeyAlmaz1C.dll",

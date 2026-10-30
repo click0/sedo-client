@@ -61,15 +61,15 @@ Linux Ansible controller
     ▼
 Windows worker
     │
-    ├── sedo_client.py (Python)
+    ├── sedo/client.py (Python)
     │       │
-    │       └─ opensc_signer.py  ──▶  pkcs11-tool.exe  (OpenSC 32-bit)
+    │       └─ sedo/opensc_signer.py  ──▶  pkcs11-tool.exe  (OpenSC 32-bit)
     │              або
-    │           pkcs11_signer.py ──▶  PyKCS11  (HW-токен)
+    │           sedo/pkcs11_signer.py ──▶  PyKCS11  (HW-токен)
     │              або
-    │           virtual_signer.py ──▶ PyKCS11  (Key-6.dat, без USB)
+    │           sedo/virtual_signer.py ──▶ PyKCS11  (Key-6.dat, без USB)
     │              або
-    │           iit_client.py    ──▶  JSON-RPC до EUSignAgent
+    │           sedo/iit_client.py    ──▶  JSON-RPC до EUSignAgent
     │                                    │
     │                                    ▼
     │                         IIT "Користувач ЦСК" (GUI запущено)
@@ -161,16 +161,23 @@ ansible-playbook -i inventory/hosts.yml playbooks/sedo_daily.yml --ask-vault-pas
 
 ```
 sedo-client/
-├── sedo_client.py              — бізнес-логіка, авто-вибір backend, CLI
-├── iit_client.py               — JSON-RPC клієнт до EUSignAgent
-├── opensc_signer.py            — OpenSC subprocess backend (рекомендовано)
-├── pkcs11_signer.py            — PyKCS11 direct backend (HW + Avest)
-├── virtual_signer.py           — PyKCS11 virtual backend (Key-6.dat, без USB)
-├── mechanism_ids.py            — константи PKCS#11 mechanism IDs (DSTU 4145)
+├── sedo/                       — пакет (pip install . / python -m sedo)
+│   ├── client.py               — бізнес-логіка, авто-вибір backend, CLI
+│   ├── config.py               — config.toml / config_local.toml, профілі ключів, ролі
+│   ├── check.py                — --check: звіт про готовність без витрати спроби PIN
+│   ├── iit_client.py           — JSON-RPC клієнт до EUSignAgent
+│   ├── opensc_signer.py        — OpenSC subprocess backend (рекомендовано)
+│   ├── pkcs11_signer.py        — PyKCS11 direct backend (HW + Avest)
+│   ├── virtual_signer.py       — PyKCS11 virtual backend (Key-6.dat, без USB)
+│   ├── mechanism_ids.py        — константи PKCS#11 mechanism IDs (DSTU 4145)
+│   └── _console.py             — спільні CLI-хелпери (UTF-8 консоль, введення PIN)
+├── sedo_client.py, iit_client.py, opensc_signer.py, pkcs11_signer.py, …
+│                               — старі імена верхнього рівня, лишені як шими: як
+│                                 скрипт запускають ту саму програму, при імпорті
+│                                 попереджають і віддають модуль sedo.*
 ├── opensc-test-almaz.ps1       — PowerShell валідація стеку на Windows
 ├── pyproject.toml              — пакування (pip install .)
 ├── requirements.txt
-├── _console.py                 — спільні CLI-хелпери (UTF-8 консоль, введення PIN)
 ├── tests/                      — pytest (без токена, агента і мережі)
 │   ├── conftest.py             — фейковий PyKCS11
 │   ├── test_sedo_client.py, test_iit_client.py, test_opensc_signer.py,
@@ -179,7 +186,8 @@ sedo-client/
 │   ├── test_bugs_v029.py, test_coverage_gaps.py,
 │   │   test_p1_*.py, test_p2_*.py                    — регресії з аудитів
 │   ├── test_iit_inventory.py, test_fiddler_analyze.py — scripts/
-│   └── test_versions.py        — заголовки Version: проти pyproject
+│   ├── test_versions.py        — заголовки Version: проти pyproject
+│   └── test_shims.py           — старі імена верхнього рівня працюють
 ├── scripts/
 │   ├── fiddler_analyze.py      — розбирає Fiddler SAZ capture
 │   ├── smoke_test.py           — швидка перевірка середовища
@@ -395,7 +403,7 @@ git push origin v0.33
   `opensc-test-almaz.ps1`.
 
 - **[LudovicRousseau/PyKCS11](https://github.com/LudovicRousseau/PyKCS11)** —
-  Python-binding для PKCS#11, використовується у backend `pkcs11_signer.py`.
+  Python-binding для PKCS#11, використовується у backend `sedo/pkcs11_signer.py`.
 
 ### Верифікація підписів
 

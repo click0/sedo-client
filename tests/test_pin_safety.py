@@ -14,10 +14,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-import iit_client
-from iit_client import IITClient, IITRPCError, discover_agent, verify_agent
-from mechanism_ids import NON_SIGNATURE_MECHANISMS, choose_sign_mechanism
-from opensc_signer import OpenSCSigner
+from sedo import iit_client
+from sedo.iit_client import IITClient, IITRPCError, discover_agent, verify_agent
+from sedo.mechanism_ids import NON_SIGNATURE_MECHANISMS, choose_sign_mechanism
+from sedo.opensc_signer import OpenSCSigner
 
 ROOT = Path(__file__).resolve().parent.parent
 PIN = "9876"
@@ -36,7 +36,7 @@ def _opensc(tmp_path):
 # ─── 1. PIN must not survive a subprocess timeout ───────────
 
 class TestTimeoutDoesNotLeakPin:
-    @patch("opensc_signer.subprocess.run")
+    @patch("sedo.opensc_signer.subprocess.run")
     def test_timeout_message_is_redacted(self, mock_run, tmp_path):
         signer = _opensc(tmp_path)
         mock_run.side_effect = subprocess.TimeoutExpired(
@@ -54,7 +54,7 @@ class TestTimeoutDoesNotLeakPin:
             chain = chain.__cause__ or chain.__context__
             seen += 1
 
-    @patch("opensc_signer.subprocess.run")
+    @patch("sedo.opensc_signer.subprocess.run")
     def test_timeout_keeps_type_and_timeout_value(self, mock_run, tmp_path):
         signer = _opensc(tmp_path)
         mock_run.side_effect = subprocess.TimeoutExpired(
@@ -64,13 +64,13 @@ class TestTimeoutDoesNotLeakPin:
         assert exc.value.timeout == 12.5
         assert exc.value.output == b"o" and exc.value.stderr == b"e"
 
-    @patch("opensc_signer.subprocess.run")
+    @patch("sedo.opensc_signer.subprocess.run")
     def test_pin_absent_from_every_log_record(self, mock_run, tmp_path, caplog):
         import logging
         signer = _opensc(tmp_path)
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=1, stdout=b"", stderr=b"CKR_PIN_INCORRECT")
-        with caplog.at_level(logging.DEBUG, logger="opensc_signer"):
+        with caplog.at_level(logging.DEBUG, logger="sedo.opensc_signer"):
             with pytest.raises(RuntimeError):
                 signer.sign(b"x")
         assert PIN not in caplog.text
@@ -79,7 +79,7 @@ class TestTimeoutDoesNotLeakPin:
 # ─── 2. Agent discovery must identify the agent before any PIN ──
 
 class TestAgentDiscoveryVerifies:
-    @patch("iit_client.requests.post")
+    @patch("sedo.iit_client.requests.post")
     def test_verify_accepts_jsonrpc_result(self, mock_post):
         mock_post.return_value = MagicMock(
             status_code=200, json=lambda: {"jsonrpc": "2.0", "id": 0, "result": "1.3.1"})
@@ -87,7 +87,7 @@ class TestAgentDiscoveryVerifies:
         # The probe itself must never carry a PIN.
         assert "pin" not in str(mock_post.call_args).lower()
 
-    @patch("iit_client.requests.post")
+    @patch("sedo.iit_client.requests.post")
     def test_verify_accepts_jsonrpc_error(self, mock_post):
         """An agent that lacks GetVersion still proves it is a JSON-RPC server."""
         mock_post.return_value = MagicMock(
@@ -103,41 +103,41 @@ class TestAgentDiscoveryVerifies:
         ({"jsonrpc": "1.0", "result": 1}, 200),   # wrong envelope version
         ({"jsonrpc": "2.0", "result": 1}, 404),   # right shape, wrong status
     ])
-    @patch("iit_client.requests.post")
+    @patch("sedo.iit_client.requests.post")
     def test_verify_rejects_foreign_service(self, mock_post, body, status):
         mock_post.return_value = MagicMock(status_code=status, json=lambda: body)
         assert verify_agent("127.0.0.1", 8080) is False
 
-    @patch("iit_client.requests.post")
+    @patch("sedo.iit_client.requests.post")
     def test_verify_rejects_html(self, mock_post):
         resp = MagicMock(status_code=200)
         resp.json.side_effect = ValueError("no json")
         mock_post.return_value = resp
         assert verify_agent("127.0.0.1", 8080) is False
 
-    @patch("iit_client.requests.post", side_effect=requests.exceptions.ConnectionError)
+    @patch("sedo.iit_client.requests.post", side_effect=requests.exceptions.ConnectionError)
     def test_verify_rejects_dead_port(self, _mock_post):
         assert verify_agent("127.0.0.1", 9999) is False
 
     def test_discover_skips_a_port_that_answers_but_is_not_the_agent(self):
         """The regression: 8080 answers OPTIONS, so discovery used to pick it."""
-        with patch("iit_client.read_port_from_registry", return_value=(None, None)), \
-             patch("iit_client.probe_port", return_value=True), \
-             patch("iit_client.verify_agent",
+        with patch("sedo.iit_client.read_port_from_registry", return_value=(None, None)), \
+             patch("sedo.iit_client.probe_port", return_value=True), \
+             patch("sedo.iit_client.verify_agent",
                    side_effect=lambda h, p, **kw: p == 8083) as ver:
             assert discover_agent() == ("127.0.0.1", 8083, False)
         assert ver.called
 
     def test_discover_returns_none_when_nothing_verifies(self):
-        with patch("iit_client.read_port_from_registry", return_value=(8081, 8083)), \
-             patch("iit_client.probe_port", return_value=True), \
-             patch("iit_client.verify_agent", return_value=False):
+        with patch("sedo.iit_client.read_port_from_registry", return_value=(8081, 8083)), \
+             patch("sedo.iit_client.probe_port", return_value=True), \
+             patch("sedo.iit_client.verify_agent", return_value=False):
             assert discover_agent() is None
 
     def test_registry_port_is_also_verified(self):
-        with patch("iit_client.read_port_from_registry", return_value=(8081, None)), \
-             patch("iit_client.probe_port", return_value=True), \
-             patch("iit_client.verify_agent", return_value=False) as ver:
+        with patch("sedo.iit_client.read_port_from_registry", return_value=(8081, None)), \
+             patch("sedo.iit_client.probe_port", return_value=True), \
+             patch("sedo.iit_client.verify_agent", return_value=False) as ver:
             assert discover_agent() is None
         assert ver.called
 
@@ -146,7 +146,7 @@ class TestAgentDiscoveryVerifies:
 
 class TestErrorBodyRedaction:
     def _client_returning(self, status, text):
-        with patch("iit_client.requests.Session") as S:
+        with patch("sedo.iit_client.requests.Session") as S:
             sess = MagicMock()
             S.return_value = sess
             resp = MagicMock(status_code=status, text=text)
@@ -210,7 +210,7 @@ class TestMacMechanismNeverChosen:
             choose_sign_mechanism([])
 
     def test_pkcs11_find_sign_mechanism_reports_runtimeerror(self, fake_pykcs11, tmp_path):
-        from pkcs11_signer import PKCS11Signer
+        from sedo.pkcs11_signer import PKCS11Signer
         mod = tmp_path / "PKCS11.EKeyAlmaz1C.dll"
         mod.write_bytes(b"fake")
         fake_pykcs11.MECHS = {0x80420014: fake_pykcs11.CKF_SIGN}
@@ -219,7 +219,7 @@ class TestMacMechanismNeverChosen:
             signer.find_sign_mechanism()
 
     def test_virtual_find_sign_mechanism_reports_runtimeerror(self, fake_pykcs11, tmp_path):
-        from virtual_signer import VirtualSigner
+        from sedo.virtual_signer import VirtualSigner
         mod = tmp_path / "PKCS11.Virtual.EKeyAlmaz1C.dll"
         mod.write_bytes(b"fake")
         fake_pykcs11.MECHS = {0x80420014: fake_pykcs11.CKF_SIGN}
@@ -231,7 +231,7 @@ class TestMacMechanismNeverChosen:
 
 class TestOpenSCCliStopsOnPinFailure:
     def test_list_objects_raises_instead_of_returning_empty(self, tmp_path):
-        with patch("opensc_signer.subprocess.run") as mock_run:
+        with patch("sedo.opensc_signer.subprocess.run") as mock_run:
             signer = _opensc(tmp_path)
             mock_run.return_value = subprocess.CompletedProcess(
                 args=[], returncode=1, stdout=b"", stderr=b"CKR_PIN_INCORRECT")
@@ -241,7 +241,7 @@ class TestOpenSCCliStopsOnPinFailure:
     def test_cli_spends_one_attempt_not_three(self, tmp_path, monkeypatch):
         """--list-objects --get-cert --sign used to run three --login calls."""
         import sys
-        from opensc_signer import main
+        from sedo.opensc_signer import main
         monkeypatch.chdir(tmp_path)
         (tmp_path / "data.bin").write_bytes(b"payload")
         monkeypatch.setattr(sys, "argv", [
@@ -249,7 +249,7 @@ class TestOpenSCCliStopsOnPinFailure:
             "--list-objects", "--get-cert", "--sign", "data.bin"])
         fake = MagicMock()
         fake.list_objects.side_effect = RuntimeError("list-objects failed: CKR_PIN_INCORRECT")
-        with patch("opensc_signer.OpenSCSigner", return_value=fake):
+        with patch("sedo.opensc_signer.OpenSCSigner", return_value=fake):
             with pytest.raises(RuntimeError, match="list-objects failed"):
                 main()
         fake.get_certificate.assert_not_called()
@@ -297,7 +297,7 @@ class TestPowerShellScriptPinBudget:
 # ─── Cross-cutting: no PIN in any user-visible failure ──
 
 class TestNoPinInUserVisibleErrors:
-    @patch("opensc_signer.subprocess.run")
+    @patch("sedo.opensc_signer.subprocess.run")
     def test_sign_failure_message_has_no_pin(self, mock_run, tmp_path):
         signer = _opensc(tmp_path)
         mock_run.return_value = subprocess.CompletedProcess(

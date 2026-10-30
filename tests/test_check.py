@@ -9,8 +9,8 @@ from unittest.mock import patch
 
 import pytest
 
-import sedo_check as chk
-from sedo_config import KeyProfile, default_config
+from sedo import check as chk
+from sedo.config import KeyProfile, default_config
 
 
 def _pe(machine: int) -> bytes:
@@ -98,8 +98,8 @@ class TestOpenSCCheck:
         module, tool = self._module(tmp_path)
         monkeypatch.setenv("SEDO_PIN_LOGIN", "x")
         rep = chk.Report()
-        with patch("opensc_signer.OpenSCSigner._find_tool", return_value=tool), \
-             patch("opensc_signer.subprocess.run", side_effect=_fake_run):
+        with patch("sedo.opensc_signer.OpenSCSigner._find_tool", return_value=tool), \
+             patch("sedo.opensc_signer.subprocess.run", side_effect=_fake_run):
             chk.check_profile(KeyProfile("login", backend="opensc", module=module, cert_id="01"),
                               "https://sedo", True, rep)
         text = rep.render()
@@ -111,8 +111,8 @@ class TestOpenSCCheck:
     def test_missing_cert_id_fails(self, tmp_path, monkeypatch):
         module, tool = self._module(tmp_path)
         rep = chk.Report()
-        with patch("opensc_signer.OpenSCSigner._find_tool", return_value=tool), \
-             patch("opensc_signer.subprocess.run", side_effect=_fake_run):
+        with patch("sedo.opensc_signer.OpenSCSigner._find_tool", return_value=tool), \
+             patch("sedo.opensc_signer.subprocess.run", side_effect=_fake_run):
             chk.check_profile(KeyProfile("login", backend="opensc", module=module, cert_id="07"),
                               "https://sedo", True, rep)
         assert not rep.ok and "cert_id 07 НЕМАЄ" in rep.render()
@@ -122,14 +122,14 @@ class TestOpenSCCheck:
         tool64 = tmp_path / "tool64.exe"
         tool64.write_bytes(_pe(0x8664))
         rep = chk.Report()
-        with patch("opensc_signer.OpenSCSigner._find_tool", return_value=str(tool64)), \
-             patch("opensc_signer.subprocess.run", side_effect=_fake_run):
+        with patch("sedo.opensc_signer.OpenSCSigner._find_tool", return_value=str(tool64)), \
+             patch("sedo.opensc_signer.subprocess.run", side_effect=_fake_run):
             chk.check_profile(KeyProfile("login", backend="opensc", module=module), "u", True, rep)
         assert not rep.ok and "sc_dlopen failed" in rep.render()
 
     def test_missing_module_fails_without_running_anything(self, tmp_path):
         rep = chk.Report()
-        with patch("opensc_signer.subprocess.run") as run:
+        with patch("sedo.opensc_signer.subprocess.run") as run:
             chk.check_profile(KeyProfile("login", backend="opensc", module=str(tmp_path / "no.dll")),
                               "u", True, rep)
         run.assert_not_called()
@@ -141,8 +141,8 @@ class TestOpenSCCheck:
         def no_token(cmd, **kw):
             return subprocess.CompletedProcess(cmd, 0, stdout=b"Available slots:\nNo slots.\n", stderr=b"")
         rep = chk.Report()
-        with patch("opensc_signer.OpenSCSigner._find_tool", return_value=tool), \
-             patch("opensc_signer.subprocess.run", side_effect=no_token):
+        with patch("sedo.opensc_signer.OpenSCSigner._find_tool", return_value=tool), \
+             patch("sedo.opensc_signer.subprocess.run", side_effect=no_token):
             chk.check_profile(KeyProfile("login", backend="opensc", module=module), "u", True, rep)
         assert not rep.ok and "токен не видно" in rep.render()
 
@@ -182,7 +182,7 @@ class TestRunChecks:
         cfg = default_config()
         cfg.keys["default"].backend = "opensc"
         cfg.keys["default"].module = str(tmp_path / "missing.dll")
-        with patch("sedo_check.check_profile", side_effect=RuntimeError("boom")):
+        with patch("sedo.check.check_profile", side_effect=RuntimeError("boom")):
             rep = chk.run_checks(cfg)
         text = rep.render()
         assert "Ролі: auth → default, sign → default" in text
@@ -192,7 +192,7 @@ class TestRunChecks:
 
     def test_cli_exit_codes(self, tmp_path, monkeypatch, capsys):
         import sys
-        from sedo_client import main
+        from sedo.client import main
         monkeypatch.chdir(tmp_path)
         (tmp_path / "l.toml").write_text("[keys.k]\nbackend='opensc'\nmodule='nope.dll'\n", encoding="utf-8")
         monkeypatch.setattr(sys, "argv", ["sedo-client", "--config", "l.toml", "--check"])

@@ -15,11 +15,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-import iit_client
-from iit_client import IITClient, IITAgentNotFound, probe_port
-from mechanism_ids import choose_sign_mechanism
-from opensc_signer import OpenSCSigner
-from sedo_client import SEDOClient, IITAgentAdapter
+from sedo import iit_client
+from sedo.iit_client import IITClient, IITAgentNotFound, probe_port
+from sedo.mechanism_ids import choose_sign_mechanism
+from sedo.opensc_signer import OpenSCSigner
+from sedo.client import SEDOClient, IITAgentAdapter
 
 
 # ─── shared helpers ──────────────────────────────────────────
@@ -40,7 +40,7 @@ class FakeSigner:
 
 def _make_client():
     signer = FakeSigner()
-    with patch("sedo_client.SEDOClient._pick_backend", return_value=signer):
+    with patch("sedo.client.SEDOClient._pick_backend", return_value=signer):
         client = SEDOClient()
     client.session = MagicMock()
     return client, signer
@@ -71,27 +71,27 @@ class TestVirtualKeyFileWarning:
         return mod
 
     def test_key_in_other_dir_warns(self, fake_pykcs11, tmp_path, caplog):
-        from virtual_signer import VirtualSigner
+        from sedo.virtual_signer import VirtualSigner
         mod = self._module(tmp_path)
         other = tmp_path / "elsewhere"
         other.mkdir()
         key = other / "Key-6.dat"
         key.write_bytes(b"key")
-        with caplog.at_level(logging.WARNING, logger="virtual_signer"):
+        with caplog.at_level(logging.WARNING, logger="sedo.virtual_signer"):
             VirtualSigner(module_path=str(mod), key_file=str(key))
         assert "not next to the virtual module" in caplog.text
 
     def test_key_next_to_module_is_silent(self, fake_pykcs11, tmp_path, caplog):
-        from virtual_signer import VirtualSigner
+        from sedo.virtual_signer import VirtualSigner
         mod = self._module(tmp_path)
         key = tmp_path / "Key-6.dat"
         key.write_bytes(b"key")
-        with caplog.at_level(logging.WARNING, logger="virtual_signer"):
+        with caplog.at_level(logging.WARNING, logger="sedo.virtual_signer"):
             VirtualSigner(module_path=str(mod), key_file=str(key))
         assert "not next to the virtual module" not in caplog.text
 
     def test_missing_key_file_still_raises(self, fake_pykcs11, tmp_path):
-        from virtual_signer import VirtualSigner
+        from sedo.virtual_signer import VirtualSigner
         mod = self._module(tmp_path)
         with pytest.raises(FileNotFoundError, match="Key file"):
             VirtualSigner(module_path=str(mod),
@@ -124,7 +124,7 @@ class TestDirectKepKeepsProbing:
 # ─── B3: teardown never raises on a lost agent ──────────────
 
 class TestFinalizeSwallowsTransportErrors:
-    @patch("iit_client.requests.Session")
+    @patch("sedo.iit_client.requests.Session")
     def test_finalize_with_connection_error(self, mock_session_cls):
         sess = MagicMock()
         mock_session_cls.return_value = sess
@@ -141,7 +141,7 @@ class TestFinalizeSwallowsTransportErrors:
         mock = MagicMock()
         mock.finalize.side_effect = IITAgentNotFound("agent died")
         adapter = IITAgentAdapter(mock)
-        with caplog.at_level(logging.WARNING, logger="sedo_client"):
+        with caplog.at_level(logging.WARNING, logger="sedo.client"):
             adapter.logout()  # must not raise
         assert "finalize failed" in caplog.text
 
@@ -202,19 +202,19 @@ class TestOpenSCEmptyOutput:
         return subprocess.CompletedProcess(args=cmd, returncode=0,
                                            stdout=b"", stderr=b"")
 
-    @patch("opensc_signer.subprocess.run")
+    @patch("sedo.opensc_signer.subprocess.run")
     def test_sign_empty_output_raises(self, mock_run, tmp_path):
         mock_run.side_effect = self._empty_run
         with pytest.raises(RuntimeError, match="empty signature"):
             _opensc(tmp_path, cert_id="01").sign(b"data")
 
-    @patch("opensc_signer.subprocess.run")
+    @patch("sedo.opensc_signer.subprocess.run")
     def test_get_certificate_empty_output_raises(self, mock_run, tmp_path):
         mock_run.side_effect = self._empty_run
         with pytest.raises(RuntimeError, match="empty certificate"):
             _opensc(tmp_path, cert_id="01").get_certificate()
 
-    @patch("opensc_signer.subprocess.run")
+    @patch("sedo.opensc_signer.subprocess.run")
     def test_cert_id_kwarg_used(self, mock_run, tmp_path):
         seen = {}
 
@@ -237,13 +237,13 @@ class TestOpenSCEmptyOutput:
 
 class TestOpenSCMainPrompts:
     def test_get_cert_without_pin_prompts(self, tmp_path, monkeypatch):
-        from opensc_signer import main
+        from sedo.opensc_signer import main
         monkeypatch.chdir(tmp_path)
         monkeypatch.setattr(sys, "argv",
                             ["opensc_signer", "--module", "m.dll", "--get-cert"])
         fake = MagicMock()
         fake.get_certificate.return_value = b"\x30\x82"
-        with patch("opensc_signer.OpenSCSigner", return_value=fake), \
+        with patch("sedo.opensc_signer.OpenSCSigner", return_value=fake), \
              patch("getpass.getpass", return_value="9999") as gp:
             main()
         gp.assert_called_once()
@@ -252,13 +252,13 @@ class TestOpenSCMainPrompts:
         assert (tmp_path / "almaz-cert.der").read_bytes() == b"\x30\x82"
 
     def test_list_slots_only_does_not_prompt(self, tmp_path, monkeypatch):
-        from opensc_signer import main
+        from sedo.opensc_signer import main
         monkeypatch.chdir(tmp_path)
         monkeypatch.setattr(sys, "argv",
                             ["opensc_signer", "--module", "m.dll", "--list-slots"])
         fake = MagicMock()
         fake.list_slots.return_value = "slot 0"
-        with patch("opensc_signer.OpenSCSigner", return_value=fake), \
+        with patch("sedo.opensc_signer.OpenSCSigner", return_value=fake), \
              patch("getpass.getpass") as gp:
             main()
         gp.assert_not_called()
@@ -303,7 +303,7 @@ class TestChooseSignMechanism:
             choose_sign_mechanism([])
 
     def test_virtual_signer_filters_ckf_sign(self, fake_pykcs11, tmp_path):
-        from virtual_signer import VirtualSigner
+        from sedo.virtual_signer import VirtualSigner
         mod = tmp_path / "PKCS11.Virtual.EKeyAlmaz1C.dll"
         mod.write_bytes(b"fake")
         fake_pykcs11.MECHS = {
@@ -313,7 +313,7 @@ class TestChooseSignMechanism:
         assert VirtualSigner(module_path=str(mod))._find_sign_mechanism() == 0x1042
 
     def test_virtual_signer_no_signing_raises(self, fake_pykcs11, tmp_path):
-        from virtual_signer import VirtualSigner
+        from sedo.virtual_signer import VirtualSigner
         mod = tmp_path / "PKCS11.Virtual.EKeyAlmaz1C.dll"
         mod.write_bytes(b"fake")
         fake_pykcs11.MECHS = {0x1042: fake_pykcs11.CKF_VERIFY}
@@ -321,7 +321,7 @@ class TestChooseSignMechanism:
             VirtualSigner(module_path=str(mod))._find_sign_mechanism()
 
     def test_pkcs11_signer_uses_shared_policy(self, fake_pykcs11, tmp_path):
-        from pkcs11_signer import PKCS11Signer
+        from sedo.pkcs11_signer import PKCS11Signer
         mod = tmp_path / "PKCS11.EKeyAlmaz1C.dll"
         mod.write_bytes(b"fake")
         fake_pykcs11.MECHS = {
@@ -341,7 +341,7 @@ class TestDefaultPort:
         assert client.port == 8081
         assert client.base_url.endswith(":8081/json-rpc")
 
-    @patch("iit_client.requests.options")
+    @patch("sedo.iit_client.requests.options")
     def test_probe_port_default(self, mock_options):
         mock_options.return_value = MagicMock(status_code=200)
         probe_port()
