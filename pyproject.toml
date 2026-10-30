@@ -39,3 +39,17 @@ addopts = "-v --tb=short"
 
 [tool.setuptools]
 packages = ["sedo"]
+# The top-level names of earlier versions, as compatibility shims (each warns
+# and hands back its sedo.* module), so `from sedo_client import SEDOClient`
+# still works in an installed copy.
+py-modules = [
+    "_console",
+    "sedo_config",
+    "sedo_check",
+    "sedo_client",
+    "iit_client",
+    "opensc_signer",
+    "pkcs11_signer",
+    "virtual_signer",
+    "mechanism_ids",
+]
