@@ -52,6 +52,9 @@ Everything runs unattended — no operator prompts.
 To complete the server integration, run `scripts/fiddler_analyze.py` on a
 SAZ capture of a real login session and update the `_flow_*` methods and
 API paths accordingly. See [`FIDDLER-CAPTURE-GUIDE.md`](FIDDLER-CAPTURE-GUIDE.md).
+The contract for those steps is already written: `tests/test_sedo_contract.py`
+(unimplemented parts are `xfail(strict=True)`); the summary is
+[`docs/TODO.md`](docs/TODO.md).
 
 ## Architecture
 

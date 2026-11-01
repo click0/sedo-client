@@ -51,7 +51,9 @@ Year:     2025-2026
 
 Щоб завершити серверну інтеграцію, виконайте `scripts/fiddler_analyze.py`
 на SAZ-capture реального логіну й оновіть `_flow_*` методи та API-шляхи.
-Див. [`FIDDLER-CAPTURE-GUIDE.md`](FIDDLER-CAPTURE-GUIDE.md).
+Див. [`FIDDLER-CAPTURE-GUIDE.md`](FIDDLER-CAPTURE-GUIDE.md). Контракт для
+цих кроків уже написано: `tests/test_sedo_contract.py` (нереалізоване —
+`xfail(strict=True)`), зведення — [`docs/TODO.md`](docs/TODO.md).
 
 ## Архітектура
 
