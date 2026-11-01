@@ -135,6 +135,12 @@ Response: Set-Cookie + 200 OK
 
 Потім оновити `sedo/client.py` — замінити TODO placeholders реальними URL/JSON.
 
+Контракт уже чекає в `tests/test_sedo_contract.py`: словник `EXPECTED` там
+повторює JSON-схеми з цього гайду, а нереалізовані кроки позначено
+`xfail(strict=True)`. Порядок після capture: оновити `EXPECTED` і локальний
+двійник СЕДО за `docs/sedo-flow.md` → реалізувати `_flow_*` → тест стане
+XPASS і CI вимагатиме зняти маркер. Зведений перелік — `docs/TODO.md`.
+
 ## Фаза 3: Повторний прогон з Python клієнтом
 
 Після оновлення sedo/client.py, запустити з логуванням:
