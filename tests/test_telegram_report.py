@@ -254,15 +254,22 @@ class TestCLI:
         p.write_text(content, encoding="utf-8")
         assert tr.main(["--summary", str(p), "--dry-run"]) == 2
 
-    def test_runs_as_a_module_with_stdlib_only(self, tmp_path):
-        """The controller runs it with plain python3: importing requests would break that."""
+    def test_runs_as_a_module_with_stdlib_only_on_a_cp1252_console(self, tmp_path):
+        """
+        The controller runs it with plain python3: importing requests would
+        break that. cp1252 stands for a Windows console or a C-locale
+        controller: printing the Cyrillic + emoji report used to raise
+        UnicodeEncodeError there (caught by the Windows CI job).
+        """
+        import os
         code = ("import sys; sys.modules['requests'] = None; "
                 "import runpy; sys.argv = ['x', '--summary', sys.argv[1], '--dry-run']; "
                 "runpy.run_module('sedo.telegram_report', run_name='__main__')")
+        env = dict(os.environ, PYTHONIOENCODING="cp1252")
         r = subprocess.run([sys.executable, "-c", code, self._summary(tmp_path)], cwd=ROOT,
-                           capture_output=True, text=True, encoding="utf-8")
+                           capture_output=True, text=True, encoding="utf-8", env=env)
         assert r.returncode == 0, r.stderr
-        assert "щоденний прогін 2026-11-06" in r.stdout
+        assert "⚠️ СЕДО ЗСУ, щоденний прогін 2026-11-06" in r.stdout
 
 
 class TestPlaybookContract:

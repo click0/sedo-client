@@ -172,6 +172,10 @@ def _read_summary(arg: str) -> dict:
 
 
 def main(argv=None) -> int:
+    # The report is Cyrillic with emoji: a cp1252/cp866 console (Windows, or a
+    # controller with a C locale) raised UnicodeEncodeError on print.
+    from ._console import force_utf8_io          # stdlib only, like this module
+    force_utf8_io()
     ap = argparse.ArgumentParser(description="Send the SEDO daily report to Telegram "
                                              f"(token in ${TOKEN_ENV}, chat in ${CHAT_ENV})")
     ap.add_argument("--summary", required=True, help="summary JSON file, or - for stdin")
