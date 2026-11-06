@@ -24,8 +24,11 @@ A nightly cron job driven from a Linux host that:
    qualified electronic signature (KEP)
 2. Downloads new documents from the inbox
 3. Verifies signatures with [`ua-sign-verify`](https://github.com/click0)
-4. Reports the result (Ansible summary; a Telegram report is planned —
-   `vault.yml.example` already has the keys, nothing sends it yet)
+4. Reports the result: the Ansible summary and, when `telegram.bot_token` /
+   `chat_id` are filled in `vault.yml`, a Telegram message with each worker's
+   state (documents fetched, or the step it stopped at) and the verification
+   counts. A failed worker no longer stops the playbook before verification
+   and the report; the run still exits non-zero
 
 Everything runs unattended — no operator prompts.
 
@@ -427,4 +430,4 @@ Our project is the only publicly available tool that covers all of:
 - SEDO Armed Forces (`sedo.mod.gov.ua`) login automation
 - Ansible playbook ↔ Windows worker ↔ Almaz-1K integration
 - Four-backend architecture (opensc / pkcs11 / virtual / iit_agent)
-- The full cycle: login → fetch → verify (→ Telegram report, planned)
+- The full cycle: login → fetch → verify → Telegram report

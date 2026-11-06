@@ -63,145 +63,163 @@
     output_dir_win: "Z:{{ output_dir | replace('/', '\\') }}"
 
   tasks:
-    # Fail here, not inside PyKCS11. A native python3 cannot dlopen a 32-bit
-    # Windows PE DLL, so there is no safe default for this variable.
-    - name: Stop if the Wine Python interpreter is not configured
-      ansible.builtin.fail:
-        msg: >-
-          sedo_client_python is not set. The virtual backend needs a WINDOWS
-          Python running inside the Wine prefix — a native python3 cannot load
-          PKCS11.Virtual.EKeyAlmaz1C.dll (32-bit PE), and WINEPREFIX has no
-          effect on a native process. Set it in the inventory, for example
-          sedo_client_python: 'wine C:\Python312\python.exe'
-          and see docs/LINUX-WINE-DEPLOYMENT.md §6.
-      when: not client_python
+    # Every worker step in one block. A failure of any step (no Wine Python,
+    # missing Key-6.dat, the client failed) lands in rescue: the reason is
+    # recorded and the worker is NOT marked failed. Otherwise, when every
+    # worker fails (typically: the only one), Ansible stops the whole
+    # playbook after this play, and neither verification, nor the summary,
+    # nor the Telegram report run, exactly when the report matters most.
+    # The run still ends in failure: the last task of the verification play.
+    - name: Daily run of the worker
+      block:
+        # Fail here, not inside PyKCS11. A native python3 cannot dlopen a 32-bit
+        # Windows PE DLL, so there is no safe default for this variable.
+        - name: Stop if the Wine Python interpreter is not configured
+          ansible.builtin.fail:
+            msg: >-
+              sedo_client_python is not set. The virtual backend needs a WINDOWS
+              Python running inside the Wine prefix — a native python3 cannot load
+              PKCS11.Virtual.EKeyAlmaz1C.dll (32-bit PE), and WINEPREFIX has no
+              effect on a native process. Set it in the inventory, for example
+              sedo_client_python: 'wine C:\Python312\python.exe'
+              and see docs/LINUX-WINE-DEPLOYMENT.md §6.
+          when: not client_python
 
-    - name: Remember the worker date for the verification play
-      ansible.builtin.set_fact:
-        sedo_fetch_date: "{{ date_today }}"
+        - name: Remember the worker date for the verification play
+          ansible.builtin.set_fact:
+            sedo_fetch_date: "{{ date_today }}"
 
-    - name: Verify Wine prefix exists
-      ansible.builtin.stat:
-        path: "{{ wine_prefix }}/system.reg"
-      register: wine_check
+        - name: Verify Wine prefix exists
+          ansible.builtin.stat:
+            path: "{{ wine_prefix }}/system.reg"
+          register: wine_check
 
-    - name: Stop if Wine prefix missing
-      ansible.builtin.fail:
-        msg: >-
-          Wine prefix not found at {{ wine_prefix }}.
-          Run `WINEARCH=win32 WINEPREFIX={{ wine_prefix }} wineboot --init`
-          and see docs/LINUX-WINE-DEPLOYMENT.md
-      when: not wine_check.stat.exists
+        - name: Stop if Wine prefix missing
+          ansible.builtin.fail:
+            msg: >-
+              Wine prefix not found at {{ wine_prefix }}.
+              Run `WINEARCH=win32 WINEPREFIX={{ wine_prefix }} wineboot --init`
+              and see docs/LINUX-WINE-DEPLOYMENT.md
+          when: not wine_check.stat.exists
 
-    - name: Verify virtual PKCS#11 module is in place
-      ansible.builtin.stat:
-        path: "{{ virtual_module }}"
-      register: module_check
+        - name: Verify virtual PKCS#11 module is in place
+          ansible.builtin.stat:
+            path: "{{ virtual_module }}"
+          register: module_check
 
-    - name: Stop if virtual module missing
-      ansible.builtin.fail:
-        msg: >-
-          PKCS11.Virtual.EKeyAlmaz1C.dll not found at {{ virtual_module }}.
-          See docs/MINIMUM-FILES-LIST.md scenario B.
-      when: not module_check.stat.exists
+        - name: Stop if virtual module missing
+          ansible.builtin.fail:
+            msg: >-
+              PKCS11.Virtual.EKeyAlmaz1C.dll not found at {{ virtual_module }}.
+              See docs/MINIMUM-FILES-LIST.md scenario B.
+          when: not module_check.stat.exists
 
-    - name: Verify Key-6.dat is in place
-      ansible.builtin.stat:
-        path: "{{ key_file }}"
-      register: key_check
+        - name: Verify Key-6.dat is in place
+          ansible.builtin.stat:
+            path: "{{ key_file }}"
+          register: key_check
 
-    - name: Stop if Key-6.dat missing
-      ansible.builtin.fail:
-        msg: "Key-6.dat not found at {{ key_file }}"
-      when: not key_check.stat.exists
+        - name: Stop if Key-6.dat missing
+          ansible.builtin.fail:
+            msg: "Key-6.dat not found at {{ key_file }}"
+          when: not key_check.stat.exists
 
-    - name: Create output directory
-      ansible.builtin.file:
-        path: "{{ output_dir }}"
-        state: directory
-        mode: '0750'
+        - name: Create output directory
+          ansible.builtin.file:
+            path: "{{ output_dir }}"
+            state: directory
+            mode: '0750'
 
-    # Key profiles (login with one key, sign with another) via config_local.toml
-    # next to the client, rendered from sedo_keys / sedo_roles; profile PINs
-    # from the vault (sedo_key_pins) as SEDO_PIN_<PROFILE>. Without sedo_keys
-    # nothing changes: one key, SEDO_PIN, as before. Module paths inside the
-    # profiles must be Windows-form (the client runs under Wine).
-    - name: Render config_local.toml with key profiles
-      ansible.builtin.template:
-        src: config_local.toml.j2
-        dest: "{{ client_path }}/config_local.toml"
-        mode: '0640'
-      when: sedo_keys is defined
+        # Key profiles (login with one key, sign with another) via config_local.toml
+        # next to the client, rendered from sedo_keys / sedo_roles; profile PINs
+        # from the vault (sedo_key_pins) as SEDO_PIN_<PROFILE>. Without sedo_keys
+        # nothing changes: one key, SEDO_PIN, as before. Module paths inside the
+        # profiles must be Windows-form (the client runs under Wine).
+        - name: Render config_local.toml with key profiles
+          ansible.builtin.template:
+            src: config_local.toml.j2
+            dest: "{{ client_path }}/config_local.toml"
+            mode: '0640'
+          when: sedo_keys is defined
 
-    - name: Collect profile PINs as environment variables
-      ansible.builtin.set_fact:
-        sedo_pin_env: >-
-          {{ sedo_pin_env | default({})
-             | combine({'SEDO_PIN_' ~ (item.key | upper | regex_replace('[^A-Z0-9]+', '_')): item.value}) }}
-      loop: "{{ (sedo_key_pins[inventory_hostname] | default({})) | dict2items }}"
-      loop_control:
-        label: "{{ item.key }}"
-      no_log: true
+        - name: Collect profile PINs as environment variables
+          ansible.builtin.set_fact:
+            sedo_pin_env: >-
+              {{ sedo_pin_env | default({})
+                 | combine({'SEDO_PIN_' ~ (item.key | upper | regex_replace('[^A-Z0-9]+', '_')): item.value}) }}
+          loop: "{{ (sedo_key_pins[inventory_hostname] | default({})) | dict2items }}"
+          loop_control:
+            label: "{{ item.key }}"
+          no_log: true
 
-    # Windows-форми шляхів: аргументи читає Windows-Python усередині префіксу.
-    - name: Run sedo-client with virtual backend
-      ansible.builtin.command:
-        cmd: >-
-          {{ client_python }} "{{ client_script_win }}"
-          --url "{{ sedo_url | default('https://sedo.mod.gov.ua') }}"
-          --backend virtual
-          --module "{{ virtual_module_win }}"
-          --key-file "{{ key_file_win }}"
-          --fetch
-          --since "{{ date_today }}"
-          --output "{{ output_dir_win }}"
-      environment: >-
-        {{ {'WINEPREFIX': wine_prefix, 'SEDO_PIN': virtual_pins[inventory_hostname]}
-           | combine(sedo_pin_env | default({})) }}
-      no_log: true
-      register: sedo_result
-      failed_when: false
-      # "changed" only when something was actually downloaded, not on any rc==0.
-      changed_when: "sedo_result.stdout is search('Документів: [1-9]')"
+        # Windows-форми шляхів: аргументи читає Windows-Python усередині префіксу.
+        - name: Run sedo-client with virtual backend
+          ansible.builtin.command:
+            cmd: >-
+              {{ client_python }} "{{ client_script_win }}"
+              --url "{{ sedo_url | default('https://sedo.mod.gov.ua') }}"
+              --backend virtual
+              --module "{{ virtual_module_win }}"
+              --key-file "{{ key_file_win }}"
+              --fetch
+              --since "{{ date_today }}"
+              --output "{{ output_dir_win }}"
+          environment: >-
+            {{ {'WINEPREFIX': wine_prefix, 'SEDO_PIN': virtual_pins[inventory_hostname]}
+               | combine(sedo_pin_env | default({})) }}
+          no_log: true
+          register: sedo_result
+          failed_when: false
+          # "changed" only when something was actually downloaded, not on any rc==0.
+          changed_when: "sedo_result.stdout is search('Документів: [1-9]')"
 
-    # rc through default() as well: when command cannot even START the process
-    # the result carries msg but no rc, and these tasks died with "dict object
-    # has no attribute 'rc'", hiding the real cause — exactly what splitting
-    # no_log from the diagnostics was meant to prevent.
-    - name: Show client diagnostics on failure (rc / stdout / stderr, no PIN)
-      ansible.builtin.debug:
-        msg:
-          rc: "{{ sedo_result.rc | default('(process did not start)') }}"
-          msg: "{{ sedo_result.msg | default('') }}"
-          stdout: "{{ sedo_result.stdout | default('') }}"
-          stderr: "{{ sedo_result.stderr | default('') }}"
-      when: sedo_result.rc | default(-1) != 0
+        # rc through default() as well: when command cannot even START the process
+        # the result carries msg but no rc, and these tasks died with "dict object
+        # has no attribute 'rc'", hiding the real cause — exactly what splitting
+        # no_log from the diagnostics was meant to prevent.
+        - name: Show client diagnostics on failure (rc / stdout / stderr, no PIN)
+          ansible.builtin.debug:
+            msg:
+              rc: "{{ sedo_result.rc | default('(process did not start)') }}"
+              msg: "{{ sedo_result.msg | default('') }}"
+              stdout: "{{ sedo_result.stdout | default('') }}"
+              stderr: "{{ sedo_result.stderr | default('') }}"
+          when: sedo_result.rc | default(-1) != 0
 
-    - name: Stop if the client failed
-      ansible.builtin.fail:
-        msg: >-
-          sedo-client exited with rc={{ sedo_result.rc | default('(did not start)') }}
-          — see diagnostics above
-      when: sedo_result.rc | default(-1) != 0
+        - name: Stop if the client failed
+          ansible.builtin.fail:
+            msg: >-
+              sedo-client exited with rc={{ sedo_result.rc | default('(did not start)') }}
+              — see diagnostics above
+          when: sedo_result.rc | default(-1) != 0
 
-    - name: Find downloaded documents
-      ansible.builtin.find:
-        paths: "{{ output_dir }}"
-        patterns: "*.zip"
-      register: downloaded
+        - name: Find downloaded documents
+          ansible.builtin.find:
+            paths: "{{ output_dir }}"
+            patterns: "*.zip"
+          register: downloaded
 
-    # Works for a remote Linux worker and for lin01 (connection: local) alike.
-    - name: Fetch to the controller
-      ansible.builtin.fetch:
-        src: "{{ item.path }}"
-        dest: "{{ report_root }}/{{ inventory_hostname }}/{{ date_today }}/"
-        flat: true
-      loop: "{{ downloaded.files }}"
-      when: downloaded.files | length > 0
+        # Works for a remote Linux worker and for lin01 (connection: local) alike.
+        - name: Fetch to the controller
+          ansible.builtin.fetch:
+            src: "{{ item.path }}"
+            dest: "{{ report_root }}/{{ inventory_hostname }}/{{ date_today }}/"
+            flat: true
+          loop: "{{ downloaded.files }}"
+          when: downloaded.files | length > 0
+      rescue:
+        - name: Remember where the worker stopped (for the report)
+          ansible.builtin.set_fact:
+            sedo_worker_error: >-
+              {{ ansible_failed_task.name | default('?') }}:
+              {{ ansible_failed_result.msg | default('') | truncate(300) }}
 
 - name: Verify downloaded signatures
   hosts: localhost
   gather_facts: true
+  # For telegram.bot_token / chat_id (the Telegram report at the end).
+  vars_files:
+    - ../inventory/vault.yml
   vars:
     date_today: "{{ ansible_date_time.date }}"
     report_root: /opt/sedo-reports
@@ -253,3 +271,68 @@
           Valid:    {{ verify_results.results | selectattr('rc', 'eq', 0) | list | length }}
           Warnings: {{ verify_results.results | selectattr('rc', 'eq', 1) | list | length }}
           Errors:   {{ verify_results.results | selectattr('rc', 'ne', 0) | selectattr('rc', 'ne', 1) | list | length }}
+
+    # Telegram report, only when vault.yml has telegram.bot_token. Summary,
+    # token and chat go as one JSON on stdin, under no_log. Not through
+    # environment: on Linux Ansible prepends it to the command
+    # (sh -c 'VAR=... python3 ...'), which puts the token in the -vvv log and
+    # in ps. A separate task shows the outcome. A failed send does not fail
+    # the run: verification is done and "Summary report" above showed it.
+    - name: Collect worker state for the Telegram report
+      ansible.builtin.set_fact:
+        report_workers: >-
+          {{ report_workers | default([]) + [{
+               'host': item,
+               'rc': (hostvars[item].sedo_result | default({})).rc | default(none),
+               'stdout': (hostvars[item].sedo_result | default({})).stdout | default(''),
+               'error': hostvars[item].sedo_worker_error | default(none)}] }}
+      loop: "{{ groups['sedo_workers_linux'] | default([]) }}"
+      when: telegram.bot_token | default('') | length > 0
+
+    - name: Collect verification results for the Telegram report
+      ansible.builtin.set_fact:
+        report_verify: "{{ report_verify | default([]) + [{'file': item.item, 'rc': item.rc | default(none)}] }}"
+      loop: "{{ verify_results.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item | default('?') }}"
+      when: telegram.bot_token | default('') | length > 0
+
+    - name: Send the report to Telegram
+      ansible.builtin.command:
+        cmd: python3 -m sedo.telegram_report --summary -
+        chdir: "{{ playbook_dir }}/../.."
+        stdin: >-
+          {{ {'date': fetch_dates | join(', '),
+              'workers': report_workers | default([]),
+              'verify': report_verify | default([]),
+              'telegram': {'bot_token': telegram.bot_token,
+                           'chat_id': telegram.chat_id | default('')}} | to_json }}
+      register: telegram_result
+      changed_when: telegram_result.rc | default(1) == 0
+      failed_when: false
+      no_log: true
+      when: telegram.bot_token | default('') | length > 0
+
+    - name: Telegram report outcome (no token)
+      ansible.builtin.debug:
+        msg: >-
+          rc={{ telegram_result.rc | default('(process did not start)') }}
+          {{ telegram_result.stdout | default('') }}
+          {{ telegram_result.stderr | default('') }}
+          {{ telegram_result.msg | default('') if telegram_result.rc is not defined else '' }}
+      when: telegram_result is defined and telegram_result is not skipped
+
+    # Workers that stopped in rescue are not marked failed (else the
+    # verification play would not run). The run must still end in failure
+    # for cron and monitoring; the reason is already in the reports above.
+    - name: Fail the run if any worker did not complete
+      ansible.builtin.fail:
+        msg: >-
+          Workers with errors:
+          {% for h in failed_workers %}{{ h }} ({{ hostvars[h].sedo_worker_error }}){{ '; ' if not loop.last }}{% endfor %}
+      vars:
+        failed_workers: >-
+          {{ groups['sedo_workers_linux'] | default([]) | map('extract', hostvars)
+             | selectattr('sedo_worker_error', 'defined')
+             | map(attribute='inventory_hostname') | list }}
+      when: failed_workers | length > 0

@@ -48,7 +48,7 @@ Year:     2025-2026
 | Прострочена сесія → помилка, не «0 документів» | тримається | `TestSessionExpiry::test_inbox_without_session_raises` |
 | Пагінація (`next`) | **не реалізовано**; схема здогадана | `TestInboxAhead` (xfail) |
 | `download_document` (`/api/documents/<id>/export`) | шлях здогаданий; ZIP пишеться як `<id>.zip` | `TestDirectKEP`, `test_sedo_client::TestDownloadDocument` |
-| Перевірка тіла (HTML замість ZIP при протухлій сесії) | **не реалізовано** | `TestSessionExpiry::test_download_of_html_is_rejected` (xfail) |
+| Перевірка тіла (HTML замість ZIP при протухлій сесії) | працює: HTML і порожня відповідь відхиляються, не-ZIP зберігається з попередженням | `TestSessionExpiry::test_download_of_a_non_document_is_rejected`, `test_expired_session_redirect_to_login_is_rejected`, `test_cli_stops_on_an_html_export` |
 | Підпис документа всередині СЕДО ключем `sign` | **не реалізовано**; `sign` працює лише через `--sign-file` | `TestDocumentSigningAhead` (xfail) |
 
 ## 4. Контракт з Ansible — тримається
@@ -60,11 +60,12 @@ Year:     2025-2026
 | 0 документів — не `changed` | `TestCLIContract::test_zero_documents_is_not_changed` |
 | Верифікація `ua-sign-verify` на контролері | крок playbook-а; окремого тесту немає (зовнішній проєкт) |
 
-## 5. Звіт — заплановано
+## 5. Звіт — готово
 
 | Що | Стан | Тест |
 |---|---|---|
-| Telegram-звіт (`telegram.bot_token` / `chat_id` у `vault.yml.example`) | **нічого не надсилає** | `TestReportAhead` (xfail): `telegram_report.build_report()` + `send()` |
+| Telegram-звіт (`telegram.bot_token` / `chat_id` у `vault.yml`) | працює: `sedo/telegram_report.py`, крок наприкінці обох плейбуків | `tests/test_telegram_report.py` |
+| Провал воркера не зупиняє плейбук до верифікації і звіту | працює: `block`/`rescue` у play воркера, помилка прогону — останнім кроком | `TestPlaybookFailureFlow` |
 
 ## Порядок, коли буде capture
 
