@@ -5,6 +5,9 @@ __pycache__/
 .pytest_cache/
 .coverage
 htmlcov/
+# Virtual environments (CLAUDE.md: python -m venv .venv in the repository root)
+.venv/
+venv/
 
 # Secrets
 config_local.toml

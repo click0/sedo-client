@@ -101,7 +101,10 @@ class SEDO(ThreadingHTTPServer):
         self.documents = [dict(d) for d in EXPECTED["inbox"]["documents"]]
 
     def start(self):
-        threading.Thread(target=self.serve_forever, daemon=True).start()
+        # shutdown() waits for the next poll; the default 0.5 s made every
+        # teardown cost half a second (~10 s of the whole suite).
+        threading.Thread(target=self.serve_forever, kwargs={"poll_interval": 0.01},
+                         daemon=True).start()
         return self
 
     def paths(self, method=None):

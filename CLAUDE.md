@@ -63,9 +63,11 @@ workflow** з гілки: це dry-run, що збирає все (Linux, FreeBSD
 - `sedo/client.py` — `SEDOClient`, CLI, автовибір backend
   (`_pick_backend`), flow авторизації і завантаження документів.
 - `sedo/config.py` — `config.toml` (у git, спільний) + `config_local.toml`
-  (приватний), профілі ключів і ролі `auth`/`sign`; шукаються в корені
-  репозиторію (`default_config_dir()`: на рівень вище за пакет) або поруч
-  із `.exe` у збірці PyInstaller.
+  (приватний), профілі ключів і ролі `auth`/`sign`. `default_config_dir()`:
+  поруч із `.exe` у збірці PyInstaller; у checkout — корінь репозиторію (на
+  рівень вище за пакет, впізнається за `pyproject.toml` / `config.toml`);
+  у встановленому wheel — `%APPDATA%\sedo-client` або
+  `~/.config/sedo-client` (`user_config_dir()`).
 - `sedo/check.py` — `--check`: звіт про готовність без витрати спроби PIN.
 - Підписувачі (backend-и):
   - `sedo/opensc_signer.py` — `pkcs11-tool` з OpenSC як subprocess
