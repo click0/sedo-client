@@ -109,9 +109,13 @@ play верифікації, і звіт не надсилався б саме �
 - **Секрет у плейбуку — не через `environment:` на Linux-хостах.** Ansible
   дописує його перед командою (`sh -c 'VAR=… python3 …'`), тож значення
   видно в лозі `-vvv` попри `no_log` і в `ps`. Токен Telegram тому йде JSON-ом
-  у `stdin` під `no_log`. На Windows (WinRM) `environment:` іде в payload,
-  не в командний рядок. Відоме порушення, ще не виправлене: `SEDO_PIN` у
-  `environment:` запуску клієнта в `sedo_daily_linux.yml`.
+  у `stdin` під `no_log`, а PIN-и в `sedo_daily_linux.yml` — рядками
+  `NAME=VALUE` у `stdin`, які `sh`-обгортка `pin_exec` експортує перед `exec`
+  клієнта (тести: `tests/test_playbook_linux.py`). На Windows (WinRM)
+  `environment:` іде в payload, не в командний рядок.
+- **Без escape-ів у літералах Jinja** (`'\\'`, `'\n'`): Ansible лишає їх як
+  є, а в YAML у подвійних лапках `'\\'` стає незакритим `'\'`. Потрібний
+  символ — змінною з YAML (`backslash`, `newline` у Linux-плейбуку).
 - **PIN — через середовище або запит, не через argv клієнта.** `--pin`
   лишається, але позначений як найменш безпечний; плейбуки передають
   `SEDO_PIN`, профілі — `pin_env`/`pin_file`, PIN відкритим текстом у

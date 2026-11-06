@@ -8,10 +8,13 @@
 #   - IIT DLLs + Key-6.dat in {{ sedo_libs }}
 #   - Registry keys set inside the prefix
 #
-# The PIN reaches the client via the SEDO_PIN environment variable
-# (sedo_client.py: --pin → SEDO_PIN → getpass), so it never appears on the
-# command line / process list. no_log stays on the run task as defence in
-# depth; rc/stdout/stderr are shown by a separate task on failure.
+# The PIN reaches the client as the SEDO_PIN environment variable
+# (sedo_client.py: --pin → SEDO_PIN → getpass), but NOT through Ansible's
+# `environment:`: on a Linux host Ansible prepends that to the `sh -c` it runs,
+# so the PIN would show in the `-vvv` log despite no_log and in `ps` for the
+# whole run. The PINs go on stdin instead; a small sh wrapper (pin_exec) reads
+# them into the environment and execs the client. no_log stays on the run task;
+# rc/stdout/stderr are shown by a separate task on failure.
 #
 # ⚠️  ВАЖЛИВО ПРО ІНТЕРПРЕТАТОР
 #
@@ -50,7 +53,18 @@
     # Інтерпретатор, який реально запускає клієнта. Мусить бути Windows-Python
     # усередині Wine-префіксу — див. блок ⚠️ у шапці файлу. Приклад:
     #   sedo_client_python: 'wine C:\Python312\python.exe'
+    # Рядок ділиться за пробілами, backslash-і лишаються як є. Шлях із
+    # пробілом — списком: ['wine', 'C:\Program Files\Python312\python.exe'].
     client_python: "{{ sedo_client_python | default('') }}"
+    client_python_argv: >-
+      {{ client_python if client_python is not string else client_python.split() }}
+
+    # Reads NAME=VALUE lines (the PINs) from stdin into the environment, then
+    # execs the client ("$@"). Only SEDO_PIN / SEDO_PIN_<PROFILE> are exported.
+    pin_exec: >-
+      while IFS= read -r line || [ -n "$line" ]; do
+      case $line in SEDO_PIN=*|SEDO_PIN_*=*) export "$line";; esac;
+      done; exec "$@"
 
     # Windows-форми тих самих шляхів, бо аргументи читає Windows-Python.
     # drive_c/sedo-libs усередині префіксу — це C:\sedo-libs (той самий шлях,
@@ -59,8 +73,15 @@
     sedo_libs_win: 'C:\sedo-libs'
     virtual_module_win: "{{ sedo_libs_win }}\\PKCS11.Virtual.EKeyAlmaz1C.dll"
     key_file_win: "{{ sedo_libs_win }}\\Key-6.dat"
-    client_script_win: "Z:{{ (client_path ~ '/sedo_client.py') | replace('/', '\\') }}"
-    output_dir_win: "Z:{{ output_dir | replace('/', '\\') }}"
+    # No backslash or \n inside a Jinja string literal: Ansible keeps escapes
+    # there as typed (checked on ansible-core 2.18 and 2.21), so '\\' is two
+    # backslashes and '\n' two characters. "…'\\'…" in double-quoted YAML was
+    # worse: Jinja got '\', an unterminated literal, and the run task died with
+    # "Syntax error in template". The characters come from YAML instead.
+    backslash: '\'
+    newline: "\n"
+    client_script_win: "Z:{{ (client_path ~ '/sedo_client.py') | replace('/', backslash) }}"
+    output_dir_win: "Z:{{ output_dir | replace('/', backslash) }}"
 
   tasks:
     # Every worker step in one block. A failure of any step (no Wine Python,
@@ -142,7 +163,7 @@
             mode: '0640'
           when: sedo_keys is defined
 
-        - name: Collect profile PINs as environment variables
+        - name: Collect profile PINs as SEDO_PIN_<PROFILE>
           ansible.builtin.set_fact:
             sedo_pin_env: >-
               {{ sedo_pin_env | default({})
@@ -153,20 +174,28 @@
           no_log: true
 
         # Windows-форми шляхів: аргументи читає Windows-Python усередині префіксу.
+        # argv, not cmd: a cmd string is split by shlex, which ate the
+        # backslashes of 'wine C:\Python312\python.exe'. PINs only on stdin
+        # (see the header); environment: carries nothing secret.
         - name: Run sedo-client with virtual backend
+          vars:
+            sedo_pins: >-
+              {{ {'SEDO_PIN': virtual_pins[inventory_hostname]} | combine(sedo_pin_env | default({})) }}
           ansible.builtin.command:
-            cmd: >-
-              {{ client_python }} "{{ client_script_win }}"
-              --url "{{ sedo_url | default('https://sedo.mod.gov.ua') }}"
-              --backend virtual
-              --module "{{ virtual_module_win }}"
-              --key-file "{{ key_file_win }}"
-              --fetch
-              --since "{{ date_today }}"
-              --output "{{ output_dir_win }}"
-          environment: >-
-            {{ {'WINEPREFIX': wine_prefix, 'SEDO_PIN': virtual_pins[inventory_hostname]}
-               | combine(sedo_pin_env | default({})) }}
+            argv: >-
+              {{ ['/bin/sh', '-c', pin_exec, 'sh'] + client_python_argv
+                 + [client_script_win,
+                    '--url', sedo_url | default('https://sedo.mod.gov.ua'),
+                    '--backend', 'virtual',
+                    '--module', virtual_module_win,
+                    '--key-file', key_file_win,
+                    '--fetch',
+                    '--since', date_today,
+                    '--output', output_dir_win] }}
+            stdin: >-
+              {{ sedo_pins.keys() | list | zip(sedo_pins.values() | list) | map('join', '=') | join(newline) }}
+          environment:
+            WINEPREFIX: "{{ wine_prefix }}"
           no_log: true
           register: sedo_result
           failed_when: false
