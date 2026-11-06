@@ -81,6 +81,15 @@ workflow** з гілки: це dry-run, що збирає все (Linux, FreeBSD
 - `sedo/mechanism_ids.py` — ID механізмів PKCS#11, вибір DSTU 4145.
 - `sedo/_console.py` — спільне для всіх CLI: UTF-8 консоль, PIN
   (`--pin` → `$SEDO_PIN` → запит), `$SEDO_MODULE`, `$SEDO_MODULE_DIRS`.
+- `sedo/telegram_report.py` — Telegram-звіт наприкінці обох плейбуків
+  (`python3 -m sedo.telegram_report` на контролері). Лише stdlib: на
+  контролері пакетів клієнта може не бути.
+
+Плейбуки: усі кроки воркера — в одному `block` з `rescue`, що записує
+`sedo_worker_error`. Без цього провал усіх воркерів зупиняв би Ansible до
+play верифікації, і звіт не надсилався б саме тоді, коли він потрібен.
+Прогін завершується з помилкою останнім task-ом play верифікації. Не
+додавай `ansible.builtin.fail` у `rescue`.
 
 Кореневі `sedo_client.py`, `iit_client.py`, `opensc_signer.py`,
 `pkcs11_signer.py` та інші старі імена — **шими**: як скрипт запускають ту
@@ -97,6 +106,12 @@ workflow** з гілки: це dry-run, що збирає все (Linux, FreeBSD
   командою (сирий argv лишився б у ланцюжку винятків), RPC-методи агента з
   PIN — у `_REDACTED_METHODS`, `--show-config` друкує `redacted()`.
   Тести: `tests/test_pin_safety.py`, `tests/test_security.py`.
+- **Секрет у плейбуку — не через `environment:` на Linux-хостах.** Ansible
+  дописує його перед командою (`sh -c 'VAR=… python3 …'`), тож значення
+  видно в лозі `-vvv` попри `no_log` і в `ps`. Токен Telegram тому йде JSON-ом
+  у `stdin` під `no_log`. На Windows (WinRM) `environment:` іде в payload,
+  не в командний рядок. Відоме порушення, ще не виправлене: `SEDO_PIN` у
+  `environment:` запуску клієнта в `sedo_daily_linux.yml`.
 - **PIN — через середовище або запит, не через argv клієнта.** `--pin`
   лишається, але позначений як найменш безпечний; плейбуки передають
   `SEDO_PIN`, профілі — `pin_env`/`pin_file`, PIN відкритим текстом у

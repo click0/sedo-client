@@ -28,7 +28,7 @@ import threading
 import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
@@ -474,19 +474,3 @@ class TestDocumentSigningAhead:
         assert auth.signed == [CHALLENGE]                 # the login key signed only the challenge
         posted = next(r for r in sedo.requests if r["path"] == "/api/documents/doc-1/sign/verify")
         assert base64.b64decode(posted["json"]["signature"]).startswith(b"sig:doc:")
-
-
-class TestReportAhead:
-    @XFAIL("Telegram report is planned only: vault.yml.example reserves telegram.bot_token / "
-           "chat_id, nothing sends it (no telegram_report module)")
-    def test_telegram_report_contract(self):
-        import importlib
-        mod = importlib.import_module("telegram_report")
-        text = mod.build_report({"total": 3, "valid": 2, "warning": 1, "errors": 0})
-        assert "3" in text and "2" in text and "1" in text
-        session = MagicMock()
-        session.post.return_value = MagicMock(ok=True, status_code=200)
-        mod.send("123:ABC", "@chat", text, session=session)
-        url, kw = session.post.call_args.args[0], session.post.call_args.kwargs
-        assert url == "https://api.telegram.org/bot123:ABC/sendMessage"
-        assert kw["json"]["chat_id"] == "@chat" and kw["json"]["text"] == text

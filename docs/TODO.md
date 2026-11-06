@@ -60,11 +60,12 @@ Year:     2025-2026
 | 0 документів — не `changed` | `TestCLIContract::test_zero_documents_is_not_changed` |
 | Верифікація `ua-sign-verify` на контролері | крок playbook-а; окремого тесту немає (зовнішній проєкт) |
 
-## 5. Звіт — заплановано
+## 5. Звіт — готово
 
 | Що | Стан | Тест |
 |---|---|---|
-| Telegram-звіт (`telegram.bot_token` / `chat_id` у `vault.yml.example`) | **нічого не надсилає** | `TestReportAhead` (xfail): `telegram_report.build_report()` + `send()` |
+| Telegram-звіт (`telegram.bot_token` / `chat_id` у `vault.yml`) | працює: `sedo/telegram_report.py`, крок наприкінці обох плейбуків | `tests/test_telegram_report.py` |
+| Провал воркера не зупиняє плейбук до верифікації і звіту | працює: `block`/`rescue` у play воркера, помилка прогону — останнім кроком | `TestPlaybookFailureFlow` |
 
 ## Порядок, коли буде capture
 

@@ -24,8 +24,11 @@ virtual_pins:
 winrm_passwords:
   ws01: "ENTER_WINRM_PASSWORD_HERE"
 
-# Reserved for the planned Telegram report — NOT used by any playbook yet.
-# Leave it out, or fill it in advance; nothing reads it today.
+# Telegram report at the end of both daily playbooks (sedo.telegram_report).
+# Leave the whole block out to send nothing. bot_token comes from @BotFather
+# ("<digits>:<secret>"); the placeholder below is refused, not sent. chat_id
+# is "@channel" or a numeric id; the bot must be a member there. Both go to
+# the module as JSON on stdin under no_log, never through the environment.
 telegram:
   bot_token: "1234567890:ABCDEF..."
   chat_id: "@your_channel_or_id"
