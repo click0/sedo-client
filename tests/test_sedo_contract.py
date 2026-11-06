@@ -328,15 +328,49 @@ class TestSessionExpiry:
             c.download_document("doc-1", tmp_path / "out")
         assert not list((tmp_path / "out").glob("*")) if (tmp_path / "out").exists() else True
 
-    @XFAIL("download_document does not check the body yet: an expired session that "
-           "redirects to the login page (200 text/html) is saved as <id>.zip")
-    def test_download_of_html_is_rejected(self, sedo, tmp_path):
-        sedo.export = ("text/html; charset=utf-8", b"<html>session expired, log in</html>")
+    @pytest.mark.parametrize("export", [
+        ("text/html; charset=utf-8", b"<html>session expired, log in</html>"),
+        ("application/octet-stream", b"\xef\xbb\xbf\r\n<!DOCTYPE html><title>Login</title>"),
+        ("application/zip", b""),
+    ], ids=["text/html", "sniffed-html", "empty"])
+    def test_download_of_a_non_document_is_rejected(self, sedo, tmp_path, export):
+        sedo.export = export
         c, _ = _client(sedo)
         c.session.cookies.set(EXPECTED["cookie"], "t0k3n")
-        with c, pytest.raises(ValueError):
+        with c, pytest.raises(ValueError, match="doc-1.*nothing saved"):
             c.download_document("doc-1", tmp_path / "out")
         assert not (tmp_path / "out" / "doc-1.zip").exists()
+
+    def test_expired_session_redirect_to_login_is_rejected(self, sedo, tmp_path):
+        """No cookie, the server answers 302 → /auth/login, requests follows it to 200 HTML."""
+        sedo.unauth = "302"
+        c, _ = _client(sedo)
+        with c, pytest.raises(ValueError, match=r"redirected to .*/auth/login"):
+            c.download_document("doc-1", tmp_path / "out")
+        assert not (tmp_path / "out" / "doc-1.zip").exists()
+
+    def test_non_zip_document_is_saved_with_a_warning(self, sedo, tmp_path, caplog):
+        sedo.export = ("application/pdf", b"%PDF-1.4 signed")
+        c, _ = _client(sedo)
+        c.session.cookies.set(EXPECTED["cookie"], "t0k3n")
+        with c, caplog.at_level("WARNING", logger="sedo.client"):
+            path = c.download_document("doc-1", tmp_path / "out")
+        assert path.read_bytes() == b"%PDF-1.4 signed"
+        assert "not a ZIP (Content-Type application/pdf)" in caplog.text
+
+    def test_cli_stops_on_an_html_export(self, sedo, tmp_path, monkeypatch, capsys, caplog):
+        """The daily run fails loudly (exit 1) instead of reporting HTML pages as documents."""
+        from sedo.client import main
+        sedo.export = ("text/html", b"<html>login</html>")
+        monkeypatch.setenv("SEDO_PIN", "1234")
+        monkeypatch.setattr(sys, "argv", ["sedo-client", "--url", sedo.url, "--fetch",
+                                          "--output", str(tmp_path / "dl")])
+        with patch("sedo.client.SEDOClient._pick_backend", return_value=FakeSigner()), \
+             pytest.raises(SystemExit) as e:
+            main()
+        assert e.value.code == 1
+        assert "HTML page instead of the document" in caplog.text
+        assert not list((tmp_path / "dl").glob("*.zip"))
 
 
 # ═══ 2. Contract with the playbooks and the CLI ═══

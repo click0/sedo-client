@@ -49,6 +49,36 @@ def _safe_doc_id(doc_id) -> str:
     return doc_id
 
 
+# Start of an HTML page (after an optional UTF-8 BOM and whitespace).
+_HTML_START_RE = re.compile(rb"^(?:\xef\xbb\xbf)?\s*<(?:!doctype\s+html|html|head|body)\b", re.I)
+
+
+def _document_body(doc_id: str, r) -> bytes:
+    """
+    The body of a document export, or ValueError when it is plainly not a
+    document. requests follows redirects, so an expired session that bounces
+    to the login page arrives as 200 text/html — and used to be saved as
+    <id>.zip, for ua-sign-verify to fail on later with no hint of the cause.
+
+    The export format is still a guess (Fiddler), so only the unambiguous is
+    refused: an empty body or an HTML page. Anything else that is not a ZIP is
+    saved with a warning.
+    """
+    body = r.content or b""
+    ctype = str(r.headers.get("Content-Type", "")).lower()
+    if not body:
+        raise ValueError(f"document {doc_id}: empty response, nothing saved")
+    if "text/html" in ctype or _HTML_START_RE.match(body[:512]):
+        history = getattr(r, "history", None)
+        where = f" (redirected to {r.url})" if isinstance(history, list) and history else ""
+        raise ValueError(f"document {doc_id}: SEDO returned an HTML page instead of the "
+                         f"document{where}; the session has probably expired, nothing saved")
+    if not body.startswith(b"PK"):
+        log.warning("document %s: response is not a ZIP (Content-Type %s), saved as is",
+                    doc_id, ctype or "none")
+    return body
+
+
 # Keys a verify endpoint may use to say "no" inside a 200 response.
 _REJECTION_FLAGS = ("authenticated", "authorized", "success", "ok", "valid", "result")
 
@@ -502,8 +532,9 @@ class SEDOClient:
             f"{self.sedo_url}/api/documents/{quote(doc_id, safe='')}/export",
             timeout=60)
         r.raise_for_status()
+        body = _document_body(doc_id, r)
         output = output_dir / f"{doc_id}.zip"
-        output.write_bytes(r.content)
+        output.write_bytes(body)
         return output
 
     def __enter__(self):
