@@ -1,6 +1,10 @@
 """
 smoke_test.py — швидка перевірка що все працює на Windows worker.
 Запускати першим ділом — скаже що треба виправити.
+
+Код виходу 1 лише при ✗ / ⚠. Перевірки, які на цій ОС не мають сенсу
+(служба SCardSvr, реєстр, автопошук DLL поза Windows), позначаються «–» і
+рахуються як пропущені, а не як провал.
 """
 
 import sys
@@ -10,6 +14,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 TESTS = []
+
+
+class Skip(Exception):
+    """The check does not apply here; the message says why."""
+
 
 def test(name):
     def wrap(fn):
@@ -60,7 +69,7 @@ def t_sedo():
 @test("Windows — SCardSvr running")
 def t_scardsvr():
     if sys.platform != "win32":
-        return "skipped (not Windows)"
+        raise Skip("not Windows")
     import subprocess
     r = subprocess.run(["sc", "query", "SCardSvr"], capture_output=True, text=True,
                         timeout=10)
@@ -69,21 +78,35 @@ def t_scardsvr():
     raise AssertionError("SCardSvr not running")
 
 
-@test("PKCS11_EKeyAlmaz1C.dll findable")
+@test("PKCS#11 module (PKCS11.EKeyAlmaz1C.dll / Av337CryptokiD.dll)")
 def t_dll():
+    """
+    $SEDO_MODULE is checked on any OS: whoever set it means that file. The
+    built-in search only knows Windows paths of the IIT/Avest DLLs, so a miss
+    outside Windows (a Linux controller, CI) is a skip, not a failure; under
+    Wine, Python reports win32 and the search runs as on Windows.
+    """
+    from sedo._console import module_from_env
     from sedo.pkcs11_signer import PKCS11Signer
-    try:
-        path = PKCS11Signer._find_module()
-        size = Path(path).stat().st_size
-        return f"{path} ({size} bytes)"
-    except FileNotFoundError as e:
-        raise AssertionError(str(e))
+    explicit = module_from_env(None)
+    if explicit:
+        if not Path(explicit).is_file():
+            raise AssertionError(f"$SEDO_MODULE does not exist: {explicit}")
+        path = explicit
+    else:
+        try:
+            path = PKCS11Signer._find_module()
+        except FileNotFoundError as e:
+            if sys.platform != "win32":
+                raise Skip("not Windows and $SEDO_MODULE unset")
+            raise AssertionError(str(e))
+    return f"{path} ({Path(path).stat().st_size} bytes)"
 
 
 @test("Windows registry — IIT Sign Agent key")
 def t_reg():
     if sys.platform != "win32":
-        return "skipped"
+        raise Skip("not Windows")
     try:
         import winreg
         path = (r"SOFTWARE\Institute of Informational Technologies"
@@ -105,19 +128,23 @@ def main():
     from sedo._console import force_utf8_io
     force_utf8_io()
 
-    passed = failed = 0
+    passed = failed = skipped = 0
+    w = max(len(name) for name, _ in TESTS)
     for name, fn in TESTS:
         try:
             result = fn()
-            print(f"  ✓ {name:<50} {result}")
+            print(f"  ✓ {name:<{w}} {result}")
             passed += 1
+        except Skip as e:
+            print(f"  – {name:<{w}} skipped ({e})")
+            skipped += 1
         except AssertionError as e:
-            print(f"  ✗ {name:<50} {e}")
+            print(f"  ✗ {name:<{w}} {e}")
             failed += 1
         except Exception as e:
-            print(f"  ⚠ {name:<50} {type(e).__name__}: {e}")
+            print(f"  ⚠ {name:<{w}} {type(e).__name__}: {e}")
             failed += 1
-    print(f"\n{passed} passed, {failed} failed")
+    print(f"\n{passed} passed, {skipped} skipped, {failed} failed")
     return 0 if failed == 0 else 1
 
 
