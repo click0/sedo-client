@@ -44,7 +44,7 @@ log = logging.getLogger(__name__)
 
 __all__ = [
     "Config", "KeyProfile", "ConfigError", "load_config", "default_config",
-    "default_config_dir", "resolve_profile_pin", "redacted",
+    "default_config_dir", "user_config_dir", "resolve_profile_pin", "redacted",
     "CONFIG_BASE", "CONFIG_LOCAL", "CONFIG_ENV", "ROLES", "BACKENDS",
 ]
 
@@ -52,6 +52,14 @@ CONFIG_BASE = "config.toml"
 CONFIG_LOCAL = "config_local.toml"
 # Explicit path of the local file (replaces config_local.toml next to the client).
 CONFIG_ENV = "SEDO_CONFIG"
+# Directory name under %APPDATA% / $XDG_CONFIG_HOME for an installed package.
+APP_DIR = "sedo-client"
+
+# One level above this package: the repository root in a checkout (or an
+# editable install), but site-packages once the wheel is installed.
+_PACKAGE_ROOT = Path(__file__).resolve().parent.parent
+# Files that exist in a source tree and are never shipped in the wheel.
+_CHECKOUT_MARKERS = ("pyproject.toml", CONFIG_BASE)
 
 ROLES = ("auth", "sign")
 BACKENDS = ("auto", "opensc", "pkcs11", "virtual", "iit_agent")
@@ -100,6 +108,7 @@ class Config:
     keys: dict = dataclasses.field(default_factory=dict)      # name → KeyProfile
     roles: dict = dataclasses.field(default_factory=dict)     # role → profile name
     sources: list = dataclasses.field(default_factory=list)   # files actually read
+    config_dir: Optional[Path] = None                         # where both files were looked for
 
     def profile(self, role: str) -> KeyProfile:
         if role not in self.roles:
@@ -123,17 +132,39 @@ def default_config() -> Config:
                   roles={"auth": "default", "sign": "default"})
 
 
-def default_config_dir() -> Path:
-    """Where config.toml / config_local.toml live: next to the client.
+def user_config_dir(env: Optional[dict] = None) -> Path:
+    """
+    The per-user config directory of an installed package:
+    %APPDATA%\\sedo-client on Windows, $XDG_CONFIG_HOME/sedo-client (default
+    ~/.config/sedo-client) elsewhere.
+    """
+    env = os.environ if env is None else env
+    if sys.platform == "win32":
+        base = env.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
+    else:
+        base = env.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return Path(base) / APP_DIR
 
-    Development and the documented deployment (git clone → C:\\sedo-client,
-    `python sedo_client.py`) put them in the repository root, one level above
-    this package (sedo/config.py → the root); a PyInstaller binary looks next
-    to the .exe.
+
+def default_config_dir(env: Optional[dict] = None) -> Path:
+    """Where config.toml / config_local.toml live.
+
+    - A PyInstaller binary: next to the .exe.
+    - A source tree (the documented deployment: git clone → C:\\sedo-client,
+      `python sedo_client.py`; also `pip install -e .`): the repository root,
+      one level above this package.
+    - An installed wheel (`pip install .` → `sedo-client`): the per-user
+      directory from user_config_dir(). One level above the package is
+      site-packages there, and that is where 0.33 looked — so a pip-installed
+      client never found config_local.toml without --config / SEDO_CONFIG.
+
+    A source tree is told apart by files the wheel never ships.
     """
     if getattr(sys, "frozen", False):
         return Path(sys.executable).resolve().parent
-    return Path(__file__).resolve().parent.parent
+    if any((_PACKAGE_ROOT / name).is_file() for name in _CHECKOUT_MARKERS):
+        return _PACKAGE_ROOT
+    return user_config_dir(env)
 
 
 def _read_toml(path: Path) -> dict:
@@ -267,7 +298,7 @@ def load_config(client_dir: Optional[Path] = None, local_path: Optional[str] = N
     ``local_path`` (or $SEDO_CONFIG) replaces config_local.toml and must exist.
     """
     env = os.environ if env is None else env
-    client_dir = Path(client_dir) if client_dir is not None else default_config_dir()
+    client_dir = Path(client_dir) if client_dir is not None else default_config_dir(env)
     base = client_dir / CONFIG_BASE
     local = Path(local_path or env.get(CONFIG_ENV) or (client_dir / CONFIG_LOCAL))
     explicit_local = bool(local_path or env.get(CONFIG_ENV))
@@ -292,6 +323,7 @@ def load_config(client_dir: Optional[Path] = None, local_path: Optional[str] = N
         raise ConfigError(f"config file not found: {local}")
 
     cfg = _build(merged, sources, roles_from_local)
+    cfg.config_dir = client_dir
 
     # Environment overrides act on the key that logs in (the single-key
     # setup everyone had before profiles existed). The sign profile follows
@@ -344,6 +376,7 @@ def resolve_profile_pin(profile: KeyProfile, argv_pin: Optional[str] = None,
 def redacted(cfg: Config) -> dict:
     """The merged configuration as a plain dict, PINs replaced — for --show-config."""
     out = {
+        "config_dir": str(cfg.config_dir) if cfg.config_dir else None,
         "sources": [str(s) for s in cfg.sources],
         "sedo": {"url": cfg.sedo_url, "output": cfg.output, "since": cfg.since},
         "roles": dict(cfg.roles),

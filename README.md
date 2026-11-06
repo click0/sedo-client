@@ -240,7 +240,11 @@ sedo-client/
 
 ## Configuration: `config.toml` + `config_local.toml`
 
-Two files next to the client (the repository root / the `.exe` directory):
+Two files next to the client: the repository root when run from a checkout,
+the `.exe` directory for a binary. A client installed with `pip install .`
+(the `sedo-client` command) reads them from `%APPDATA%\sedo-client` on Windows
+or `~/.config/sedo-client` elsewhere (`$XDG_CONFIG_HOME` is honoured);
+`--show-config` prints the directory as `config_dir`.
 
 | File | In git | Holds |
 |---|---|---|

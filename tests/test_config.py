@@ -144,6 +144,68 @@ class TestLoad:
         assert cfg.profile("sign").module == "env.dll"
 
 
+# ─── where the files are looked for ─────────────────────────
+
+class TestConfigDir:
+    """Checkout → repository root; installed wheel → per-user dir; PyInstaller → .exe dir."""
+
+    @pytest.fixture
+    def site_packages(self, tmp_path, monkeypatch):
+        """The package as the wheel installs it: nothing but code one level up."""
+        sp = tmp_path / "site-packages"
+        (sp / "sedo").mkdir(parents=True)
+        (sp / "sedo_client.py").write_text("# shim\n", encoding="utf-8")   # the wheel ships shims
+        monkeypatch.setattr(sc, "_PACKAGE_ROOT", sp)
+        return sp
+
+    def test_this_checkout_is_the_repository_root(self):
+        assert sc.default_config_dir() == ROOT
+
+    @pytest.mark.parametrize("marker", ["pyproject.toml", "config.toml"])
+    def test_any_checkout_marker_is_enough(self, tmp_path, monkeypatch, marker):
+        _write(tmp_path, marker, "")
+        monkeypatch.setattr(sc, "_PACKAGE_ROOT", tmp_path)
+        assert sc.default_config_dir(env={}) == tmp_path
+
+    def test_installed_posix_uses_xdg(self, site_packages, tmp_path, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "linux")
+        xdg = tmp_path / "xdg"
+        assert sc.default_config_dir(env={"XDG_CONFIG_HOME": str(xdg)}) == xdg / "sedo-client"
+        assert sc.default_config_dir(env={}) == Path.home() / ".config" / "sedo-client"
+
+    def test_installed_windows_uses_appdata(self, site_packages, tmp_path, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "win32")
+        appdata = tmp_path / "AppData" / "Roaming"
+        assert sc.default_config_dir(env={"APPDATA": str(appdata)}) == appdata / "sedo-client"
+        assert sc.default_config_dir(env={}) == Path.home() / "AppData" / "Roaming" / "sedo-client"
+
+    def test_frozen_binary_wins(self, site_packages, tmp_path, monkeypatch):
+        exe = tmp_path / "bin" / "sedo-client.exe"
+        monkeypatch.setattr(sys, "frozen", True, raising=False)
+        monkeypatch.setattr(sys, "executable", str(exe))
+        assert sc.default_config_dir(env={"XDG_CONFIG_HOME": str(tmp_path)}) == exe.parent.resolve()
+
+    def test_installed_client_reads_the_user_local_file(self, site_packages, tmp_path, monkeypatch):
+        """The regression: 0.33 looked in site-packages and found nothing."""
+        monkeypatch.setattr(sys, "platform", "linux")
+        user = tmp_path / "xdg" / "sedo-client"
+        user.mkdir(parents=True)
+        local = _write(user, "config_local.toml", "[keys.k]\nbackend = 'opensc'\nmodule = 'm.dll'\n")
+        cfg = sc.load_config(env={"XDG_CONFIG_HOME": str(tmp_path / "xdg")})
+        assert cfg.sources == [local]
+        assert cfg.config_dir == user
+        assert cfg.profile("auth").module == "m.dll"
+        assert sc.redacted(cfg)["config_dir"] == str(user)
+
+    def test_check_names_the_directory_when_nothing_is_found(self, tmp_path):
+        from sedo.check import run_checks
+        cfg = sc.load_config(client_dir=tmp_path, env={})
+        cfg.keys["default"].backend = "opensc"
+        cfg.keys["default"].module = str(tmp_path / "missing.dll")
+        first = run_checks(cfg).render().splitlines()[0]
+        assert first == f"Конфігурація: жодного файлу у {tmp_path} (типові значення)"
+
+
 # ─── validation ─────────────────────────────────────────────
 
 class TestValidation:

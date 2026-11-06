@@ -355,7 +355,9 @@ class _Handler(BaseHTTPRequestHandler):
 def sedo(token, tmp_path):
     def start(pub_id: str):
         srv = _FakeSEDO(token.pub[pub_id], token.cert[pub_id], tmp_path)
-        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        # A short poll keeps shutdown() in teardown from waiting the default 0.5 s.
+        threading.Thread(target=srv.serve_forever, kwargs={"poll_interval": 0.01},
+                         daemon=True).start()
         srv.url = f"http://127.0.0.1:{srv.server_address[1]}"
         servers.append(srv)
         return srv

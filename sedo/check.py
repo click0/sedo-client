@@ -320,7 +320,9 @@ def check_profile(profile, sedo_url: str, is_auth_key: bool, rep: Report) -> Non
 def run_checks(config) -> Report:
     from .config import ROLES
     rep = Report()
-    rep.add("", "Конфігурація: " + (", ".join(str(s) for s in config.sources) or "жодного файлу (типові значення)"))
+    where = f" у {config.config_dir}" if getattr(config, "config_dir", None) else ""
+    rep.add("", "Конфігурація: " + (", ".join(str(s) for s in config.sources)
+                                     or f"жодного файлу{where} (типові значення)"))
     rep.add("", "Ролі: " + ", ".join(f"{r} → {config.roles[r]}" for r in ROLES if r in config.roles))
     rep.add("", f"Python: {sys.version.split()[0]} {python_bitness()}-bit, {sys.platform}")
     auth_name = config.roles.get("auth")
