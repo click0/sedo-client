@@ -3,7 +3,7 @@
 ```
 Project:  sedo-client
 Author:   Vladyslav V. Prodan
-Version:  0.34
+Version:  0.35
 License:  BSD 3-Clause
 Year:     2025-2026
 ```
