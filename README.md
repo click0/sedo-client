@@ -27,8 +27,9 @@ A nightly cron job driven from a Linux host that:
 4. Reports the result: the Ansible summary and, when `telegram.bot_token` /
    `chat_id` are filled in `vault.yml`, a Telegram message with each worker's
    state (documents fetched, or the step it stopped at) and the verification
-   counts. A failed worker no longer stops the playbook before verification
-   and the report; the run still exits non-zero
+   counts. Neither a failed nor an unreachable worker (switched off, or the
+   connection dropped mid-run) stops the playbook before verification and the
+   report; the run still exits non-zero
 
 Everything runs unattended — no operator prompts.
 

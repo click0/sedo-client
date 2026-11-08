@@ -397,10 +397,15 @@ class TestCLIContract:
         known = set(_build_parser()._option_string_actions)
         for pb in ("sedo_daily.yml", "sedo_daily_linux.yml"):
             text = (ROOT / "ansible" / "playbooks" / pb).read_text(encoding="utf-8")
-            cmd = re.search(r"sedo_client\.py(.*?)\n\s*(environment|register|args|no_log):", text, re.S)
-            assert cmd, f"{pb}: client invocation not found"
-            flags = set(re.findall(r"(--[a-z][a-z-]*)", cmd.group(1)))
-            assert flags and flags <= known, f"{pb}: unknown flags {flags - known}"
+            # The run task itself. Matching from the first "sedo_client.py" hit
+            # the header comment, so only its "--pin" was ever checked.
+            tasks = [re.sub(r"^\s*#.*$", "", t, flags=re.M)
+                     for t in re.split(r"\n(?= +- name: )", text)]
+            runs = [t for t in tasks if re.search(r"^ +(argv|cmd):", t, re.M) and "--fetch" in t]
+            assert len(runs) == 1, f"{pb}: client invocation not found"
+            flags = set(re.findall(r"(--[a-z][a-z-]*)", runs[0]))
+            assert {"--fetch", "--since", "--output", "--backend", "--url"} <= flags, f"{pb}: {flags}"
+            assert flags <= known, f"{pb}: unknown flags {flags - known}"
 
     def test_zero_documents_is_not_changed(self, sedo, tmp_path, monkeypatch, capsys):
         from sedo.client import main
@@ -445,8 +450,9 @@ class TestCMSAhead:
         assert EXPECTED["cookie"] in c.session.cookies
 
 
-class TestInboxAhead:
-    @XFAIL("fetch_inbox reads one page: a `next` link in the inbox response is ignored")
+class TestInboxPagination:
+    """The `next` schema is guessed like the paths; without `next` nothing changed."""
+
     def test_pagination_is_followed(self, sedo):
         sedo.pages = [[{"id": "a"}, {"id": "b"}], [{"id": "c"}]]
         c, _ = _client(sedo)
@@ -455,6 +461,27 @@ class TestInboxAhead:
             docs = c.fetch_inbox()
         assert [d["id"] for d in docs] == ["a", "b", "c"]
         assert sedo.paths("GET").count("/api/documents/inbox") == 2
+
+    def test_since_goes_in_the_first_request_only(self, sedo):
+        # The next link is opaque: it carries its own query, as the server built it.
+        sedo.pages = [[{"id": "a"}], [{"id": "b"}], [{"id": "c"}]]
+        c, _ = _client(sedo)
+        c.session.cookies.set(EXPECTED["cookie"], "t0k3n")
+        with c:
+            c.fetch_inbox(since="2026-11-08")
+        queries = [r["query"] for r in sedo.requests if r["path"] == "/api/documents/inbox"]
+        assert queries == [{"since": ["2026-11-08"]}, {"page": ["2"]}, {"page": ["3"]}]
+
+    def test_cli_downloads_every_page(self, sedo, tmp_path, monkeypatch, capsys):
+        from sedo.client import main
+        sedo.pages = [[{"id": "a"}, {"id": "b"}], [{"id": "c"}]]
+        monkeypatch.setenv("SEDO_PIN", "1234")
+        monkeypatch.setattr(sys, "argv", ["sedo-client", "--url", sedo.url, "--fetch",
+                                          "--since", "2026-11-08", "--output", str(tmp_path / "dl")])
+        with patch("sedo.client.SEDOClient._pick_backend", return_value=FakeSigner()):
+            main()
+        assert "Документів: 3" in capsys.readouterr().out
+        assert sorted(p.name for p in (tmp_path / "dl").glob("*.zip")) == ["a.zip", "b.zip", "c.zip"]
 
 
 class TestDocumentSigningAhead:

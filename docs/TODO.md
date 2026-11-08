@@ -46,7 +46,7 @@ Year:     2025-2026
 |---|---|---|
 | `fetch_inbox` (`/api/documents/inbox?since=`) | шлях здогаданий; `since` передається | `TestDirectKEP`, `test_sedo_client::TestFetchInbox` |
 | Прострочена сесія → помилка, не «0 документів» | тримається | `TestSessionExpiry::test_inbox_without_session_raises` |
-| Пагінація (`next`) | **не реалізовано**; схема здогадана | `TestInboxAhead` (xfail) |
+| Пагінація (`next`) | працює за здогаданою схемою: рядок `next` (відносний чи абсолютний) лише на тому ж хості, без циклів, до 100 сторінок; без `next` — як раніше | `TestInboxPagination` (обидва файли тестів) |
 | `download_document` (`/api/documents/<id>/export`) | шлях здогаданий; ZIP пишеться як `<id>.zip` | `TestDirectKEP`, `test_sedo_client::TestDownloadDocument` |
 | Перевірка тіла (HTML замість ZIP при протухлій сесії) | працює: HTML і порожня відповідь відхиляються, не-ZIP зберігається з попередженням | `TestSessionExpiry::test_download_of_a_non_document_is_rejected`, `test_expired_session_redirect_to_login_is_rejected`, `test_cli_stops_on_an_html_export` |
 | Підпис документа всередині СЕДО ключем `sign` | **не реалізовано**; `sign` працює лише через `--sign-file` | `TestDocumentSigningAhead` (xfail) |
@@ -66,10 +66,12 @@ Year:     2025-2026
 |---|---|---|
 | Telegram-звіт (`telegram.bot_token` / `chat_id` у `vault.yml`) | працює: `sedo/telegram_report.py`, крок наприкінці обох плейбуків | `tests/test_telegram_report.py` |
 | Провал воркера не зупиняє плейбук до верифікації і звіту | працює: `block`/`rescue` у play воркера, помилка прогону — останнім кроком | `TestPlaybookFailureFlow` |
+| Недосяжний воркер теж: вимкнений на старті або обрив посеред прогону | працює: `wait_for_connection` першим у block, `localhost`-якір у play воркера, `lost_workers` у звіті | `TestUnreachableWorker` |
 
 ## Порядок, коли буде capture
 
 1. `python scripts/fiddler_analyze.py sedo_login_reference.saz` → `docs/sedo-flow.md`.
 2. `EXPECTED` і маршрути двійника в `tests/test_sedo_contract.py` → реальні.
-3. `_flow_*` / шляхи API в `sedo/client.py`; зняти `xfail` там, де тест став XPASS.
+3. `_flow_*` / шляхи API / схема пагінації (`fetch_inbox`) в `sedo/client.py`;
+   зняти `xfail` там, де тест став XPASS.
 4. `python sedo_client.py --check` і прогін з `-v` на машині з токеном.

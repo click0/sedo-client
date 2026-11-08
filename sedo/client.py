@@ -17,7 +17,7 @@ import re
 import sys
 from pathlib import Path
 from typing import Optional, Protocol
-from urllib.parse import quote
+from urllib.parse import quote, urljoin, urlsplit
 
 import requests
 
@@ -138,6 +138,21 @@ SEDO_MOD_URL = "https://sedo.mod.gov.ua"
 
 # Valid values of SEDOClient(backend=...) and of --backend.
 _BACKENDS = ("auto", "opensc", "pkcs11", "virtual", "iit_agent")
+
+# A daily run asks for one day's inbox; far more pages than this is a server
+# that keeps answering "next", not a real backlog.
+INBOX_MAX_PAGES = 100
+
+
+def _origin(url: str) -> tuple:
+    """(scheme, host, port) with defaults filled in, for same-origin checks."""
+    parts = urlsplit(url)
+    scheme = parts.scheme.lower()
+    try:
+        port = parts.port
+    except ValueError:                      # "host:abc" — not a usable origin
+        port = -1
+    return scheme, (parts.hostname or ""), port or {"https": 443, "http": 80}.get(scheme)
 
 
 class Signer(Protocol):
@@ -511,18 +526,67 @@ class SEDOClient:
     # ─── Робота з документами ────────────────────────────────
 
     def fetch_inbox(self, since: Optional[str] = None) -> list:
+        """
+        Усі документи inbox, з усіх сторінок.
+
+        Схема пагінації ЗДОГАДАНА (Fiddler-запису ще немає): рядок ``next`` у
+        відповіді — посилання на наступну сторінку, абсолютне або відносне.
+        Посилання непрозоре: воно саме несе свої параметри, ``since`` іде лише
+        в перший запит. Без ``next`` поведінка та сама, що й до пагінації.
+
+        Помилка, а не неповний список: ``next`` на інший хост чи з https на
+        http (сесійний cookie туди не йде), повтор уже пройденої сторінки,
+        понад ``INBOX_MAX_PAGES`` сторінок. ``next`` не рядком (номер сторінки,
+        ``true``) — незнайома схема: попередження і лише вже прочитані
+        сторінки, як було до пагінації. Документ, що трапився на двох
+        сторінках (зсув, коли посеред обходу приходять нові), лишається один.
+        """
+        url = f"{self.sedo_url}/api/documents/inbox"
         params = {"since": since} if since else {}
-        r = self.session.get(f"{self.sedo_url}/api/documents/inbox",
-                             params=params, timeout=30)
-        r.raise_for_status()
-        data = r.json()
-        if not isinstance(data, dict):
-            raise ValueError(f"Unexpected inbox response: {type(data).__name__}, "
-                             "expected an object with 'documents'")
-        docs = data.get("documents", [])
-        if not isinstance(docs, list):
-            raise ValueError(f"Unexpected 'documents' type: {type(docs).__name__}")
-        return docs
+        docs, seen_ids, visited = [], set(), {url}
+        for page in range(1, INBOX_MAX_PAGES + 1):
+            r = self.session.get(url, params=params, timeout=30)
+            r.raise_for_status()
+            data = r.json()
+            if not isinstance(data, dict):
+                raise ValueError(f"Unexpected inbox response: {type(data).__name__}, "
+                                 "expected an object with 'documents'")
+            batch = data.get("documents", [])
+            if not isinstance(batch, list):
+                raise ValueError(f"Unexpected 'documents' type: {type(batch).__name__}")
+            for doc in batch:
+                doc_id = doc.get("id") if isinstance(doc, dict) else None
+                if isinstance(doc_id, (str, int)):
+                    if doc_id in seen_ids:
+                        continue
+                    seen_ids.add(doc_id)
+                docs.append(doc)
+
+            nxt = data.get("next")
+            if not nxt:
+                return docs
+            if not isinstance(nxt, str):
+                log.warning("Inbox 'next' is a %s, not a link: unknown pagination "
+                            "scheme, using the %d page(s) read so far",
+                            type(nxt).__name__, page)
+                return docs
+            url = self._inbox_next_url(url, nxt)
+            if url in visited:
+                raise ValueError(f"Inbox pagination loops back to {url}")
+            visited.add(url)
+            params = {}
+            log.info("Inbox page %d: %d document(s), next page", page, len(batch))
+        raise ValueError(f"Inbox has more than {INBOX_MAX_PAGES} pages; "
+                         "refusing to page further")
+
+    def _inbox_next_url(self, current: str, nxt: str) -> str:
+        """Absolute URL of ``next``; only on the SEDO origin itself."""
+        target = urljoin(current, nxt)
+        if _origin(target) != _origin(self.sedo_url):
+            t, o = urlsplit(target), urlsplit(self.sedo_url)
+            raise ValueError(f"Inbox 'next' leaves {o.scheme}://{o.netloc}: "
+                             f"{t.scheme}://{t.netloc}; not following it")
+        return target
 
     def download_document(self, doc_id: str, output_dir: Path) -> Path:
         doc_id = _safe_doc_id(doc_id)
