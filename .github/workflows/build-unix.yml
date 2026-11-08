@@ -63,7 +63,8 @@ jobs:
   build-freebsd:
     runs-on: ubuntu-latest
     # A normal run takes a few minutes; the cap turns a regression back to the
-    # hour-long swig build (see below) into a failure instead of a slow green.
+    # hour-long swig build (see .github/freebsd-build.sh) into a failure
+    # instead of a slow green. It covers both VM attempts below.
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -72,27 +73,41 @@ jobs:
       # below run on the Ubuntu host: they rely on vmactions copying the work
       # tree (dist/sedo-client included) back after `run` — its default
       # (copyback: true). If that is ever disabled, the rename step fails.
+      #
+      # Two attempts. Before the VM boots, the action downloads anyvm.py, the
+      # FreeBSD image and its SSH key from GitHub release assets, and those
+      # downloads fail now and then with 504: on 2026-11-08 four of six runs
+      # died that way, the v0.35 release among them. A real failure inside the
+      # VM (tests, build) fails the retry too, so the job still fails.
       - name: Build in FreeBSD VM
+        id: vm1
+        continue-on-error: true
         uses: vmactions/freebsd-vm@c46abacb49f09938ca4e1702d15d836285d694cc # v1.5.9
         with:
           release: "14.1"
           usesh: true
           prepare: |
             pkg install -y python311 py311-sqlite3 swig openssl
-          run: |
-            set -e
-            # FreeBSD has no py311-pip package — bootstrap pip from the stdlib.
-            python3.11 -m ensurepip --upgrade
-            python3.11 -m pip install --upgrade pip
-            python3.11 -m pip install requests pyinstaller pytest setuptools
-            # PyKCS11 has no FreeBSD wheel. In an isolated build pip fetches
-            # its "swig" build requirement from PyPI, which compiles SWIG with
-            # CMake for about an hour and then fails (no bison). Build without
-            # isolation instead, against the swig from pkg installed above.
-            python3.11 -m pip install --no-build-isolation "PyKCS11>=1.5.15" || echo "PyKCS11 unavailable on FreeBSD — building opensc/iit_agent only"
-            python3.11 -m pytest tests/ -q
-            python3.11 scripts/build_binary.py
-            ./dist/sedo-client --help
+          run: sh .github/freebsd-build.sh
+
+      # A first attempt that failed after boot leaves its VM running, on the
+      # SSH port and name the retry would use. Stop it, then give the release
+      # downloads a minute.
+      - name: Clean up before retrying the FreeBSD VM
+        if: steps.vm1.outcome == 'failure'
+        run: |
+          sudo pkill -f qemu-system-x86_64 || true
+          sleep 60
+
+      - name: Build in FreeBSD VM (retry)
+        if: steps.vm1.outcome == 'failure'
+        uses: vmactions/freebsd-vm@c46abacb49f09938ca4e1702d15d836285d694cc # v1.5.9
+        with:
+          release: "14.1"
+          usesh: true
+          prepare: |
+            pkg install -y python311 py311-sqlite3 swig openssl
+          run: sh .github/freebsd-build.sh
 
       - name: Determine version
         id: ver
