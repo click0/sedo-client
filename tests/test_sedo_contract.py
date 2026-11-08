@@ -397,10 +397,15 @@ class TestCLIContract:
         known = set(_build_parser()._option_string_actions)
         for pb in ("sedo_daily.yml", "sedo_daily_linux.yml"):
             text = (ROOT / "ansible" / "playbooks" / pb).read_text(encoding="utf-8")
-            cmd = re.search(r"sedo_client\.py(.*?)\n\s*(environment|register|args|no_log):", text, re.S)
-            assert cmd, f"{pb}: client invocation not found"
-            flags = set(re.findall(r"(--[a-z][a-z-]*)", cmd.group(1)))
-            assert flags and flags <= known, f"{pb}: unknown flags {flags - known}"
+            # The run task itself. Matching from the first "sedo_client.py" hit
+            # the header comment, so only its "--pin" was ever checked.
+            tasks = [re.sub(r"^\s*#.*$", "", t, flags=re.M)
+                     for t in re.split(r"\n(?= +- name: )", text)]
+            runs = [t for t in tasks if re.search(r"^ +(argv|cmd):", t, re.M) and "--fetch" in t]
+            assert len(runs) == 1, f"{pb}: client invocation not found"
+            flags = set(re.findall(r"(--[a-z][a-z-]*)", runs[0]))
+            assert {"--fetch", "--since", "--output", "--backend", "--url"} <= flags, f"{pb}: {flags}"
+            assert flags <= known, f"{pb}: unknown flags {flags - known}"
 
     def test_zero_documents_is_not_changed(self, sedo, tmp_path, monkeypatch, capsys):
         from sedo.client import main

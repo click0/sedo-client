@@ -89,7 +89,12 @@ workflow** з гілки: це dry-run, що збирає все (Linux, FreeBSD
 `sedo_worker_error`. Без цього провал усіх воркерів зупиняв би Ansible до
 play верифікації, і звіт не надсилався б саме тоді, коли він потрібен.
 Прогін завершується з помилкою останнім task-ом play верифікації. Не
-додавай `ansible.builtin.fail` у `rescue`.
+додавай `ansible.builtin.fail` у `rescue`. Недосяжний хост `rescue` не ловить,
+тому play воркера має `gather_facts: false`, першим віддаленим task-ом блоку
+йде `wait_for_connection`, а факти збираються вже в блоці. У `hosts:` є
+`localhost`-якір, і в play верифікації `lost_workers` підбирає воркерів, з
+якими зв'язок обірвався посеред прогону (`TestUnreachableWorker`). Не додавай
+`ignore_unreachable`: тоді наступні task-и виконуються наосліп.
 
 Кореневі `sedo_client.py`, `iit_client.py`, `opensc_signer.py`,
 `pkcs11_signer.py` та інші старі імена — **шими**: як скрипт запускають ту

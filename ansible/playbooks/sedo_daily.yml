@@ -8,8 +8,15 @@
 # rc/stdout/stderr показуються окремим task-ом при провалі — там PIN нема.
 
 - name: СЕДО ЗСУ — щоденна перевірка
-  hosts: sedo_workers
-  gather_facts: true
+  # localhost тут лише «якір», на ньому нічого не виконується (when у block).
+  # Коли всі хости play провалені або недосяжні, Ansible зупиняє весь
+  # плейбук, а недосяжний хост rescue не ловить. Якщо зв'язок з єдиним
+  # воркером обірветься посеред прогону, без якоря не було б ні верифікації,
+  # ні звіту. Недосяжний на старті воркер ловить перший task блоку.
+  hosts: sedo_workers:localhost
+  # Факти збирає task у block, після перевірки зв'язку: play-рівневий збір
+  # недосяжного воркера падає поза block, тобто повз rescue.
+  gather_facts: false
   vars_files:
     - ../inventory/vault.yml
 
@@ -42,7 +49,23 @@
     # Telegram-звіт не виконуються — саме тоді, коли звіт потрібен найбільше.
     # Прогін однаково завершується з помилкою: останній task play верифікації.
     - name: Щоденний прогін воркера
+      when: inventory_hostname in groups['sedo_workers']
       block:
+        # Недосяжний хост дає UNREACHABLE, а його rescue не ловить.
+        # wait_for_connection натомість завершується звичайною помилкою
+        # («timed out waiting for ping module test: …»), тож вимкнений ПК чи
+        # зупинений WinRM потрапляє у звіт із причиною. register позначає,
+        # що воркер почав прогін: play верифікації так відрізняє обрив зв'язку
+        # посеред прогону від воркера, якого не було в --limit.
+        - name: Перевірити, що воркер досяжний
+          ansible.builtin.wait_for_connection:
+            connect_timeout: 10
+            timeout: "{{ sedo_connect_timeout | default(120) }}"
+          register: sedo_connection
+
+        - name: Зібрати факти воркера
+          ansible.builtin.gather_facts:
+
         # Дата воркера, збережена у hostvars для play верифікації. Воркер у UTC+2/+3
         # перетинає полудень доби на 2-3 години раніше за контролер, тож фільтр за
         # датою контролера тихо пропускав би документи, покладені у <host>/<дата
@@ -165,6 +188,10 @@
             flat: true
           loop: "{{ downloaded.files }}"
           when: downloaded.files | length > 0
+
+        - name: Позначити, що воркер відпрацював
+          ansible.builtin.set_fact:
+            sedo_worker_done: true
       rescue:
         - name: Запам'ятати, на якому кроці зупинився воркер (для звіту)
           ansible.builtin.set_fact:
@@ -181,8 +208,23 @@
   vars:
     date_today: "{{ ansible_date_time.date }}"
     report_root: /opt/sedo-reports
+    lost_worker_error: >-
+      зв'язок з воркером втрачено посеред прогону (UNREACHABLE), причина в
+      лозі Ansible
 
   tasks:
+    # Воркер, що почав прогін (sedo_connection), але не дійшов ні до кінця
+    # блоку, ні до rescue: зв'язок обірвався посеред прогону, rescue такого
+    # не ловить. Без цього звіт показав би його як «не запускався».
+    - name: Знайти воркерів, з якими зв'язок обірвався
+      ansible.builtin.set_fact:
+        lost_workers: >-
+          {{ groups['sedo_workers'] | default([]) | map('extract', hostvars)
+             | selectattr('sedo_connection', 'defined')
+             | rejectattr('sedo_worker_done', 'defined')
+             | rejectattr('sedo_worker_error', 'defined')
+             | map(attribute='inventory_hostname') | list }}
+
     - name: Знайти завантажені ZIP
       ansible.builtin.find:
         paths: "{{ report_root }}"
@@ -244,7 +286,8 @@
                'host': item,
                'rc': (hostvars[item].sedo_result | default({})).rc | default(none),
                'stdout': (hostvars[item].sedo_result | default({})).stdout | default(''),
-               'error': hostvars[item].sedo_worker_error | default(none)}] }}
+               'error': hostvars[item].sedo_worker_error
+                        | default(lost_worker_error if item in lost_workers else none)}] }}
       loop: "{{ groups['sedo_workers'] | default([]) }}"
       when: telegram.bot_token | default('') | length > 0
 
@@ -288,10 +331,10 @@
       ansible.builtin.fail:
         msg: >-
           Воркери з помилкою:
-          {% for h in failed_workers %}{{ h }} ({{ hostvars[h].sedo_worker_error }}){{ '; ' if not loop.last }}{% endfor %}
+          {% for h in failed_workers %}{{ h }} ({{ hostvars[h].sedo_worker_error | default(lost_worker_error) }}){{ '; ' if not loop.last }}{% endfor %}
       vars:
         failed_workers: >-
           {{ groups['sedo_workers'] | default([]) | map('extract', hostvars)
              | selectattr('sedo_worker_error', 'defined')
-             | map(attribute='inventory_hostname') | list }}
+             | map(attribute='inventory_hostname') | list + lost_workers }}
       when: failed_workers | length > 0

@@ -345,3 +345,74 @@ class TestPlaybookFailureFlow:
         last = re.split(r"\n(?=    - name: )", self._plays(text)[-1].rstrip())[-1]
         assert "ansible.builtin.fail:" in last
         assert f"groups['{PLAYBOOKS[name]}']" in last and "selectattr('sedo_worker_error', 'defined')" in last
+
+
+class TestUnreachableWorker:
+    """
+    rescue does not catch an unreachable host, and Ansible stops the whole
+    playbook once every host of a play is failed or unreachable. Without the
+    measures below a worker that was switched off, or that dropped mid-run,
+    meant no verification and no report (checked live on ansible-core 2.18
+    and 2.21 with a closed SSH / WinRM port and a connection that drops after
+    the facts).
+    """
+
+    @pytest.fixture(params=sorted(PLAYBOOKS))
+    def playbook(self, request):
+        text = (ROOT / "ansible" / "playbooks" / request.param).read_text(encoding="utf-8")
+        plays = [p for p in re.split(r"\n(?=- name: )", text) if p.startswith("- name: ")]
+        return PLAYBOOKS[request.param], plays[0], plays[-1]
+
+    @staticmethod
+    def _block(worker):
+        return worker.split("\n      block:\n", 1)[1].split("\n      rescue:\n", 1)[0]
+
+    @staticmethod
+    def _modules(block):
+        return re.findall(r"^          (ansible\.\w+\.\w+):", block, re.M)
+
+    def test_localhost_anchors_the_worker_play(self, playbook):
+        group, worker, _ = playbook
+        assert re.search(rf"^  hosts: {group}:localhost$", worker, re.M)
+        # …and nothing runs on the anchor (a worker named localhost still runs).
+        assert f"      when: inventory_hostname in groups['{group}']\n      block:\n" in worker
+
+    def test_facts_are_gathered_inside_the_block(self, playbook):
+        _, worker, _ = playbook
+        assert re.search(r"^  gather_facts: false$", worker, re.M)
+        modules = self._modules(self._block(worker))
+        assert "ansible.builtin.gather_facts" in modules
+        assert modules.index("ansible.builtin.wait_for_connection") < modules.index("ansible.builtin.gather_facts")
+
+    def test_connection_is_checked_before_any_remote_task(self, playbook):
+        _, worker, _ = playbook
+        block = self._block(worker)
+        modules = self._modules(block)
+        first = modules.index("ansible.builtin.wait_for_connection")
+        local = {"ansible.builtin.fail", "ansible.builtin.set_fact", "ansible.builtin.debug"}
+        assert set(modules[:first]) <= local, modules[:first]
+        check = re.split(r"\n(?=        - name: )", block.split("ansible.builtin.wait_for_connection:", 1)[1])[0]
+        assert "register: sedo_connection" in check
+        assert "ignore_unreachable" not in worker, "an ignored unreachable runs the next tasks blind"
+
+    def test_block_marks_the_worker_done_last(self, playbook):
+        _, worker, _ = playbook
+        last = re.split(r"\n(?=        - name: )", self._block(worker).rstrip())[-1]
+        assert "sedo_worker_done: true" in last
+
+    def test_lost_workers_reach_the_report_and_the_failure(self, playbook):
+        group, _, verify = playbook
+        assert "lost_worker_error: >-" in verify.split("\n  tasks:\n", 1)[0]
+        tasks = [t for t in re.split(r"\n(?=    - name: )", verify.split("\n  tasks:\n", 1)[1].rstrip())
+                 if t.startswith("    - name: ")]
+        first = tasks[0]                       # before anything reads the worker state
+        assert "lost_workers: >-" in first and f"groups['{group}']" in first
+        for f in ("selectattr('sedo_connection', 'defined')",
+                  "rejectattr('sedo_worker_done', 'defined')",
+                  "rejectattr('sedo_worker_error', 'defined')"):
+            assert f in first, f
+        workers = next(t for t in tasks if "report_workers:" in t)
+        assert "default(lost_worker_error if item in lost_workers else none)" in workers
+        final = tasks[-1]
+        assert "| list + lost_workers }}" in final
+        assert "sedo_worker_error | default(lost_worker_error)" in final

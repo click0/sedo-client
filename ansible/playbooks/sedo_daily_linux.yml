@@ -33,8 +33,16 @@
 # Цей шлях ЩЕ НЕ ПЕРЕВІРЯВСЯ на живому Wine-префіксі з реальним Key-6.dat.
 
 - name: SEDO daily check (Linux / Wine / virtual token)
-  hosts: sedo_workers_linux
-  gather_facts: true
+  # localhost is only an anchor here; nothing runs on it (the block's when).
+  # When every host of a play is failed or unreachable, Ansible stops the
+  # whole playbook, and rescue does not catch an unreachable host. If the
+  # connection to the only worker drops mid-run, there would be no
+  # verification and no report without the anchor. A worker that is
+  # unreachable from the start is caught by the block's first task.
+  hosts: sedo_workers_linux:localhost
+  # The block gathers facts after the connection check: play-level gathering
+  # on an unreachable worker fails outside the block, past rescue.
+  gather_facts: false
   vars_files:
     - ../inventory/vault.yml
 
@@ -92,6 +100,7 @@
     # nor the Telegram report run, exactly when the report matters most.
     # The run still ends in failure: the last task of the verification play.
     - name: Daily run of the worker
+      when: inventory_hostname in groups['sedo_workers_linux']
       block:
         # Fail here, not inside PyKCS11. A native python3 cannot dlopen a 32-bit
         # Windows PE DLL, so there is no safe default for this variable.
@@ -105,6 +114,21 @@
               sedo_client_python: 'wine C:\Python312\python.exe'
               and see docs/LINUX-WINE-DEPLOYMENT.md §6.
           when: not client_python
+
+        # An unreachable host gives UNREACHABLE, which rescue does not catch.
+        # wait_for_connection ends in a plain failure instead ("timed out
+        # waiting for ping module test: …"), so a worker that is down reaches
+        # the report with its reason. The register marks that the worker
+        # started the run: the verification play tells a connection lost
+        # mid-run apart from a worker left out by --limit this way.
+        - name: Check that the worker is reachable
+          ansible.builtin.wait_for_connection:
+            connect_timeout: 10
+            timeout: "{{ sedo_connect_timeout | default(120) }}"
+          register: sedo_connection
+
+        - name: Gather worker facts
+          ansible.builtin.gather_facts:
 
         - name: Remember the worker date for the verification play
           ansible.builtin.set_fact:
@@ -236,6 +260,10 @@
             flat: true
           loop: "{{ downloaded.files }}"
           when: downloaded.files | length > 0
+
+        - name: Mark the worker as done
+          ansible.builtin.set_fact:
+            sedo_worker_done: true
       rescue:
         - name: Remember where the worker stopped (for the report)
           ansible.builtin.set_fact:
@@ -252,8 +280,23 @@
   vars:
     date_today: "{{ ansible_date_time.date }}"
     report_root: /opt/sedo-reports
+    lost_worker_error: >-
+      connection to the worker was lost mid-run (UNREACHABLE), the reason is
+      in the Ansible log
 
   tasks:
+    # A worker that started the run (sedo_connection) but reached neither the
+    # end of the block nor rescue: its connection dropped mid-run, which
+    # rescue does not catch. Without this the report showed it as "did not run".
+    - name: Find workers whose connection was lost
+      ansible.builtin.set_fact:
+        lost_workers: >-
+          {{ groups['sedo_workers_linux'] | default([]) | map('extract', hostvars)
+             | selectattr('sedo_connection', 'defined')
+             | rejectattr('sedo_worker_done', 'defined')
+             | rejectattr('sedo_worker_error', 'defined')
+             | map(attribute='inventory_hostname') | list }}
+
     - name: Find all ZIPs
       ansible.builtin.find:
         paths: "{{ report_root }}"
@@ -314,7 +357,8 @@
                'host': item,
                'rc': (hostvars[item].sedo_result | default({})).rc | default(none),
                'stdout': (hostvars[item].sedo_result | default({})).stdout | default(''),
-               'error': hostvars[item].sedo_worker_error | default(none)}] }}
+               'error': hostvars[item].sedo_worker_error
+                        | default(lost_worker_error if item in lost_workers else none)}] }}
       loop: "{{ groups['sedo_workers_linux'] | default([]) }}"
       when: telegram.bot_token | default('') | length > 0
 
@@ -358,10 +402,10 @@
       ansible.builtin.fail:
         msg: >-
           Workers with errors:
-          {% for h in failed_workers %}{{ h }} ({{ hostvars[h].sedo_worker_error }}){{ '; ' if not loop.last }}{% endfor %}
+          {% for h in failed_workers %}{{ h }} ({{ hostvars[h].sedo_worker_error | default(lost_worker_error) }}){{ '; ' if not loop.last }}{% endfor %}
       vars:
         failed_workers: >-
           {{ groups['sedo_workers_linux'] | default([]) | map('extract', hostvars)
              | selectattr('sedo_worker_error', 'defined')
-             | map(attribute='inventory_hostname') | list }}
+             | map(attribute='inventory_hostname') | list + lost_workers }}
       when: failed_workers | length > 0

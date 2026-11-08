@@ -66,6 +66,7 @@ Year:     2025-2026
 |---|---|---|
 | Telegram-звіт (`telegram.bot_token` / `chat_id` у `vault.yml`) | працює: `sedo/telegram_report.py`, крок наприкінці обох плейбуків | `tests/test_telegram_report.py` |
 | Провал воркера не зупиняє плейбук до верифікації і звіту | працює: `block`/`rescue` у play воркера, помилка прогону — останнім кроком | `TestPlaybookFailureFlow` |
+| Недосяжний воркер теж: вимкнений на старті або обрив посеред прогону | працює: `wait_for_connection` першим у block, `localhost`-якір у play воркера, `lost_workers` у звіті | `TestUnreachableWorker` |
 
 ## Порядок, коли буде capture
 
