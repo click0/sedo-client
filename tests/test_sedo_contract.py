@@ -450,8 +450,9 @@ class TestCMSAhead:
         assert EXPECTED["cookie"] in c.session.cookies
 
 
-class TestInboxAhead:
-    @XFAIL("fetch_inbox reads one page: a `next` link in the inbox response is ignored")
+class TestInboxPagination:
+    """The `next` schema is guessed like the paths; without `next` nothing changed."""
+
     def test_pagination_is_followed(self, sedo):
         sedo.pages = [[{"id": "a"}, {"id": "b"}], [{"id": "c"}]]
         c, _ = _client(sedo)
@@ -460,6 +461,27 @@ class TestInboxAhead:
             docs = c.fetch_inbox()
         assert [d["id"] for d in docs] == ["a", "b", "c"]
         assert sedo.paths("GET").count("/api/documents/inbox") == 2
+
+    def test_since_goes_in_the_first_request_only(self, sedo):
+        # The next link is opaque: it carries its own query, as the server built it.
+        sedo.pages = [[{"id": "a"}], [{"id": "b"}], [{"id": "c"}]]
+        c, _ = _client(sedo)
+        c.session.cookies.set(EXPECTED["cookie"], "t0k3n")
+        with c:
+            c.fetch_inbox(since="2026-11-08")
+        queries = [r["query"] for r in sedo.requests if r["path"] == "/api/documents/inbox"]
+        assert queries == [{"since": ["2026-11-08"]}, {"page": ["2"]}, {"page": ["3"]}]
+
+    def test_cli_downloads_every_page(self, sedo, tmp_path, monkeypatch, capsys):
+        from sedo.client import main
+        sedo.pages = [[{"id": "a"}, {"id": "b"}], [{"id": "c"}]]
+        monkeypatch.setenv("SEDO_PIN", "1234")
+        monkeypatch.setattr(sys, "argv", ["sedo-client", "--url", sedo.url, "--fetch",
+                                          "--since", "2026-11-08", "--output", str(tmp_path / "dl")])
+        with patch("sedo.client.SEDOClient._pick_backend", return_value=FakeSigner()):
+            main()
+        assert "Документів: 3" in capsys.readouterr().out
+        assert sorted(p.name for p in (tmp_path / "dl").glob("*.zip")) == ["a.zip", "b.zip", "c.zip"]
 
 
 class TestDocumentSigningAhead:

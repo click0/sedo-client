@@ -370,6 +370,98 @@ class TestFetchInbox:
             client.fetch_inbox()
 
 
+def _pages(client, *bodies):
+    """Serve each JSON body in turn to client.session.get."""
+    resps = []
+    for body in bodies:
+        r = MagicMock()
+        r.json.return_value = body
+        resps.append(r)
+    client.session.get.side_effect = resps
+    return client.session.get
+
+
+class TestInboxPagination:
+    """fetch_inbox follows `next` only on the SEDO origin, and never forever."""
+
+    def _urls(self, get):
+        return [c.args[0] for c in get.call_args_list]
+
+    def test_relative_and_absolute_next_are_followed(self):
+        client, _ = _make_client()
+        get = _pages(client,
+                     {"documents": [{"id": "a"}], "next": "/api/documents/inbox?page=2"},
+                     {"documents": [{"id": "b"}], "next": "https://SEDO.mod.gov.ua:443/api/documents/inbox?page=3"},
+                     {"documents": [{"id": "c"}], "next": None})
+        assert [d["id"] for d in client.fetch_inbox(since="2026-11-08")] == ["a", "b", "c"]
+        assert self._urls(get) == ["https://sedo.mod.gov.ua/api/documents/inbox",
+                                   "https://sedo.mod.gov.ua/api/documents/inbox?page=2",
+                                   "https://SEDO.mod.gov.ua:443/api/documents/inbox?page=3"]
+        assert [c.kwargs["params"] for c in get.call_args_list] == [{"since": "2026-11-08"}, {}, {}]
+
+    @pytest.mark.parametrize("nxt", [
+        "https://evil.example/api/documents/inbox?page=2",
+        "//evil.example/inbox",
+        "http://sedo.mod.gov.ua/api/documents/inbox?page=2",      # https → http
+        "https://sedo.mod.gov.ua:8443/api/documents/inbox?page=2",
+        "https://sedo.mod.gov.ua.evil.example/inbox",
+    ])
+    def test_next_off_the_origin_is_refused(self, nxt):
+        client, _ = _make_client()
+        get = _pages(client, {"documents": [{"id": "a"}], "next": nxt})
+        with pytest.raises(ValueError, match="not following it"):
+            client.fetch_inbox()
+        assert get.call_count == 1
+
+    def test_loop_is_an_error(self):
+        client, _ = _make_client()
+        p2 = {"documents": [{"id": "b"}], "next": "/api/documents/inbox?page=3"}
+        p3 = {"documents": [{"id": "c"}], "next": "/api/documents/inbox?page=2"}
+        _pages(client, {"documents": [{"id": "a"}], "next": "/api/documents/inbox?page=2"}, p2, p3)
+        with pytest.raises(ValueError, match="loops back"):
+            client.fetch_inbox()
+
+    def test_page_cap_is_an_error(self, monkeypatch):
+        monkeypatch.setattr("sedo.client.INBOX_MAX_PAGES", 3)
+        client, _ = _make_client()
+        get = _pages(client, *({"documents": [{"id": str(n)}], "next": f"/api/documents/inbox?page={n + 1}"}
+                               for n in range(1, 10)))
+        with pytest.raises(ValueError, match="more than 3 pages"):
+            client.fetch_inbox()
+        assert get.call_count == 3
+
+    @pytest.mark.parametrize("nxt", [2, True, {"page": 2}])
+    def test_unknown_next_keeps_the_pages_read(self, nxt, caplog):
+        client, _ = _make_client()
+        get = _pages(client, {"documents": [{"id": "a"}], "next": nxt})
+        with caplog.at_level("WARNING", logger="sedo.client"):
+            assert client.fetch_inbox() == [{"id": "a"}]
+        assert get.call_count == 1
+        assert "unknown pagination scheme" in caplog.text
+
+    @pytest.mark.parametrize("nxt", ["", None, False])
+    def test_empty_next_is_the_last_page(self, nxt):
+        client, _ = _make_client()
+        get = _pages(client, {"documents": [{"id": "a"}], "next": nxt})
+        assert client.fetch_inbox() == [{"id": "a"}]
+        assert get.call_count == 1
+
+    def test_document_on_two_pages_is_kept_once(self):
+        # Offset paging shifts when new documents arrive mid-walk.
+        client, _ = _make_client()
+        _pages(client,
+               {"documents": [{"id": "a"}, {"id": "b"}], "next": "/api/documents/inbox?page=2"},
+               {"documents": [{"id": "b"}, {"id": "c"}, {"title": "no id"}]})
+        assert client.fetch_inbox() == [{"id": "a"}, {"id": "b"}, {"id": "c"}, {"title": "no id"}]
+
+    def test_bad_second_page_is_still_an_error(self):
+        client, _ = _make_client()
+        _pages(client, {"documents": [{"id": "a"}], "next": "/api/documents/inbox?page=2"},
+               {"documents": "oops"})
+        with pytest.raises(ValueError, match="'documents' type"):
+            client.fetch_inbox()
+
+
 class TestDownloadDocument:
     def test_writes_zip_and_creates_dir(self, tmp_path):
         client, _ = _make_client()
