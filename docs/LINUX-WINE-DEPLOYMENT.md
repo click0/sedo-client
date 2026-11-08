@@ -159,31 +159,49 @@ the prefix. Set it in the inventory:
     sedo_workers_linux:
       vars:
         sedo_client_python: 'wine C:\Python312\python.exe'
+        # a path with a space: give a list instead
+        # sedo_client_python: ['wine', 'C:\Program Files\Python312\python.exe']
 ```
 
+A string is split on spaces and its backslashes are kept as they are.
+
 Without it the first task fails with an explanatory message instead of dying
-inside PyKCS11 several tasks later. The core task then looks like this — note
-the Windows-form paths and the PIN going through `SEDO_PIN`, never `--pin`:
+inside PyKCS11 several tasks later. The core task then looks like this. Note
+the Windows-form paths and how the PIN travels. It goes on **stdin**, under
+`no_log`, and a small `sh` wrapper (`pin_exec`) exports it as `SEDO_PIN`, plus
+`SEDO_PIN_<PROFILE>` for key profiles, then `exec`s the client:
 
 ```yaml
     - name: Run sedo-client with virtual backend
+      vars:
+        sedo_pins: >-
+          {{ {'SEDO_PIN': virtual_pins[inventory_hostname]} | combine(sedo_pin_env | default({})) }}
       ansible.builtin.command:
-        cmd: >-
-          {{ client_python }} "{{ client_script_win }}"
-          --backend virtual
-          --module "{{ virtual_module_win }}"
-          --key-file "{{ key_file_win }}"
-          --fetch
-          --since "{{ date_today }}"
-          --output "{{ output_dir_win }}"
+        argv: >-
+          {{ ['/bin/sh', '-c', pin_exec, 'sh'] + client_python_argv
+             + [client_script_win, '--backend', 'virtual', '--module', virtual_module_win,
+                '--key-file', key_file_win, '--fetch', '--since', date_today,
+                '--output', output_dir_win] }}
+        stdin: >-
+          {{ sedo_pins.keys() | list | zip(sedo_pins.values() | list) | map('join', '=') | join(newline) }}
       environment:
         WINEPREFIX: "{{ wine_prefix }}"
-        SEDO_PIN: "{{ virtual_pins[inventory_hostname] }}"
       no_log: true
 ```
 
+Two parts of this task are deliberate:
+
+- **The PIN is not passed through `environment:`.** On a Linux host Ansible
+  prepends it to the `sh -c` it runs, so the PIN would be visible in the
+  `-vvv` log despite `no_log`, and in `ps` for the whole run.
+- **The task uses `argv`, not a `cmd` string.** A `cmd` string goes through
+  `shlex`, which turned `wine C:\Python312\python.exe` into
+  `wine C:Python312python.exe`.
+
 The playbook derives the `*_win` variables from the Unix ones: everything under
-the prefix becomes `C:\…`, everything outside it `Z:\…`.
+the prefix becomes `C:\…`, everything outside it `Z:\…`. The backslash comes
+from a YAML variable, because Ansible keeps escapes such as `'\\'` inside a
+Jinja literal as typed.
 
 ## Mutex warning
 
