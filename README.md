@@ -55,7 +55,10 @@ Everything runs unattended — no operator prompts.
 
 To complete the server integration, run `scripts/fiddler_analyze.py` on a
 SAZ capture of a real login session and update the `_flow_*` methods and
-API paths accordingly. See [`FIDDLER-CAPTURE-GUIDE.md`](FIDDLER-CAPTURE-GUIDE.md).
+API paths accordingly. Its report (`--output fiddler_report.txt`) shows the
+flow request by request, including the IIT agent calls, as structure only.
+Values are masked, so the report can be handed over; the `.saz` itself should
+not be. See [`FIDDLER-CAPTURE-GUIDE.md`](FIDDLER-CAPTURE-GUIDE.md).
 The contract for those steps is already written: `tests/test_sedo_contract.py`
 (unimplemented parts are `xfail(strict=True)`); the summary is
 [`docs/TODO.md`](docs/TODO.md).
@@ -196,7 +199,7 @@ sedo-client/
 │   ├── test_versions.py        — Version: headers vs pyproject
 │   └── test_shims.py           — the old top-level names still work
 ├── scripts/
-│   ├── fiddler_analyze.py      — parses a Fiddler SAZ capture
+│   ├── fiddler_analyze.py      — Fiddler SAZ → login flow, structure only
 │   ├── smoke_test.py           — quick environment check
 │   ├── build_binary.py         — PyInstaller onefile helper
 │   ├── iit_unpack.sh           — unpacks an IIT installer without running it

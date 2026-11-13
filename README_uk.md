@@ -54,7 +54,10 @@ Year:     2025-2026
 - `fetch_inbox` / `download_document` — здогадані шляхи API
 
 Щоб завершити серверну інтеграцію, виконайте `scripts/fiddler_analyze.py`
-на SAZ-capture реального логіну й оновіть `_flow_*` методи та API-шляхи.
+на SAZ-capture реального логіну й оновіть `_flow_*` методи та API-шляхи. Його
+звіт (`--output fiddler_report.txt`) показує хід запит за запитом, разом із
+викликами агента ІІТ, але лише структуру. Значення замасковано, тож звіт
+можна передавати, а сам `.saz` — ні.
 Див. [`FIDDLER-CAPTURE-GUIDE.md`](FIDDLER-CAPTURE-GUIDE.md). Контракт для
 цих кроків уже написано: `tests/test_sedo_contract.py` (нереалізоване —
 `xfail(strict=True)`), зведення — [`docs/TODO.md`](docs/TODO.md).
@@ -195,7 +198,7 @@ sedo-client/
 │   ├── test_versions.py        — заголовки Version: проти pyproject
 │   └── test_shims.py           — старі імена верхнього рівня працюють
 ├── scripts/
-│   ├── fiddler_analyze.py      — розбирає Fiddler SAZ capture
+│   ├── fiddler_analyze.py      — Fiddler SAZ → хід входу, лише структура
 │   ├── smoke_test.py           — швидка перевірка середовища
 │   ├── build_binary.py         — PyInstaller onefile helper
 │   ├── iit_unpack.sh           — розпаковує інсталятор IIT без запуску

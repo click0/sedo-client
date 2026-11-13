@@ -70,7 +70,8 @@ Year:     2025-2026
 
 ## Порядок, коли буде capture
 
-1. `python scripts/fiddler_analyze.py sedo_login_reference.saz` → `docs/sedo-flow.md`.
+1. `python scripts/fiddler_analyze.py sedo_login_reference.saz --output fiddler_report.txt`
+   (лише структура, значення замасковано, звіт можна передавати) → `docs/sedo-flow.md`.
 2. `EXPECTED` і маршрути двійника в `tests/test_sedo_contract.py` → реальні.
 3. `_flow_*` / шляхи API / схема пагінації (`fetch_inbox`) в `sedo/client.py`;
    зняти `xfail` там, де тест став XPASS.

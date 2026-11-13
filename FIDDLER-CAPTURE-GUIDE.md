@@ -56,7 +56,28 @@ winget install Telerik.Fiddler.Classic
 
 ### Фаза 2: Аналіз
 
-Виберіть в історії запити з виглядом:
+Спершу автоматичний звіт. Він показує хід входу і роботи з документами
+запит за запитом, разом із викликами агента ІІТ, але **лише структуру**.
+Видно методи й шляхи, назви полів, параметрів і cookie, типи й довжини,
+коди відповідей. Також видно зв'язки між значеннями, без самих значень:
+`params[0] ← [5] challenge` означає, що агент підписав challenge із сесії 5.
+Сам підпис видно як `base64(… bytes, der cms-signed-data dstu4145)`: це CMS,
+а не сирий r‖s.
+
+```powershell
+# PowerShell, у C:\sedo-client
+.\venv\Scripts\python.exe scripts\fiddler_analyze.py sedo_login_reference.saz --output fiddler_report.txt
+```
+
+`--output` пише UTF-8. Перенаправлення `>` у PowerShell перекодовує вивід і
+псує кирилицю.
+
+`fiddler_report.txt` можна передавати. Cookie, токени, коди OIDC, підписи,
+сертифікати, PIN, ідентифікатори й вміст документів у ньому замасковано.
+Перед відправкою все одно перегляньте його. **Сам `.saz` не передавайте**:
+там усе це відкритим текстом (`*.saz` у `.gitignore`).
+
+Якщо звіту не вистачає, вручну в Fiddler виберіть в історії запити з виглядом:
 - `GET https://sedo.mod.gov.ua/` — headers, cookies
 - `GET https://sedo.mod.gov.ua/auth*` — початок логіну
 - `POST https://127.0.0.1:<port>/json-rpc` — всі виклики до агента
