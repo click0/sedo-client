@@ -348,7 +348,13 @@ or, from the web UI: *Releases → Draft a new release → Choose a tag → type
 
 - **ua-sign-verify** ([github.com/click0](https://github.com/click0)) —
   verifier for DSTU 4145 / Kupyna / GOST 34.311 KEP signatures, used on the
-  Linux controller to verify documents after they are downloaded.
+  Linux controller to verify documents after they are downloaded. The
+  playbooks run `python3 /opt/ua-sign-verify/cli/main.py <zip> --result-dir
+  <dir> --no-console`; another location goes in `ua_sign_verify_path`. Exit
+  codes they rely on: 0 valid, 1 valid with a warning, anything else an error.
+  If the verifier is missing, the report says the documents were not
+  verified, rather than counting them as signature errors. Exit 1 with a
+  Python traceback counts as a verifier crash, not a warning.
 
 ## Links
 

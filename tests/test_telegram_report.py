@@ -79,6 +79,29 @@ class TestBuildReport:
         text = tr.build_report({"workers": [{"host": "h" * 300, "rc": 1}] * 30})
         assert len(text) == tr.MAX_LEN and text.endswith("…")
 
+    def test_verifier_crash_is_an_error_not_a_warning(self):
+        # Python exits 1 on an unhandled exception: rc 1 alone read as "warning".
+        text = tr.build_report({"verify": [
+            {"file": "/r/ws01/d/a.zip", "rc": 0, "crash": False},
+            {"file": "/r/ws01/d/b.zip", "rc": 1, "crash": False},
+            {"file": "/r/ws01/d/c.zip", "rc": 1, "crash": True},
+        ]})
+        assert "Підписи: усього 3, валідних 1, з попередженням 1, помилок 1" in text
+        assert "  ws01/d/c.zip (збій верифікатора)" in text
+        assert text.startswith("⚠️ ")
+
+    def test_missing_verifier_is_not_reported_as_signature_errors(self):
+        text = tr.build_report({"verify": [], "verifier_missing": "/opt/ua-sign-verify/cli/main.py",
+                                "unverified": 4})
+        assert ("Підписи НЕ перевірено: ua-sign-verify не знайдено "
+                "(/opt/ua-sign-verify/cli/main.py), документів без перевірки 4") in text
+        assert "помилок" not in text and text.startswith("⚠️ ")
+
+    def test_missing_verifier_flags_the_run_even_without_documents(self):
+        # The controller is broken whether or not today brought documents.
+        text = tr.build_report({"verify": [], "verifier_missing": "/x/main.py", "unverified": 0})
+        assert text.startswith("⚠️ ") and "документів без перевірки 0" in text
+
     def test_documents_line_matches_the_client_output(self):
         """count_documents reads the line sedo.client prints and the playbooks grep."""
         src = (ROOT / "sedo" / "client.py").read_text(encoding="utf-8")
@@ -316,7 +339,9 @@ class TestPlaybookContract:
         assert re.search(r"'date':.*'workers':.*'verify':", task, re.S)
         workers = self._task(text, "report_workers:")
         assert "'host': item" in workers and "'error': hostvars[item].sedo_worker_error" in workers
-        assert "'file': item.item, 'rc':" in self._task(text, "report_verify:")
+        verify = self._task(text, "report_verify:")
+        assert "'file': item.item," in verify and "'rc': item.rc" in verify and "'crash':" in verify
+        assert re.search(r"'verifier_missing':.*'unverified':", task, re.S)
 
 
 class TestPlaybookFailureFlow:
@@ -416,3 +441,84 @@ class TestUnreachableWorker:
         final = tasks[-1]
         assert "| list + lost_workers }}" in final
         assert "sedo_worker_error | default(lost_worker_error)" in final
+
+
+class TestVerifierContract:
+    """
+    How both playbooks call ua-sign-verify, and what its exit codes mean.
+
+    The report reads exit 0 as valid, 1 as valid with a warning, anything else
+    as an error. Python itself muddies that: a missing script is exit 2 and an
+    unhandled exception exit 1. Seen live before this test: with no verifier
+    installed the report said "4 errors", and a crash counted as a warning.
+    """
+
+    @pytest.fixture(params=sorted(PLAYBOOKS))
+    def verify_play(self, request):
+        text = (ROOT / "ansible" / "playbooks" / request.param).read_text(encoding="utf-8")
+        return text[text.index("\n  hosts: localhost\n"):]
+
+    @staticmethod
+    def _tasks(play):
+        tasks = play.split("\n  tasks:\n", 1)[1]
+        return [t for t in re.split(r"\n(?=    - name: )", tasks) if t.startswith("    - name: ")]
+
+    def _task(self, play, marker):
+        return next(t for t in self._tasks(play) if marker in t)
+
+    def test_both_playbooks_call_the_verifier_the_same_way(self):
+        calls = []
+        for name in sorted(PLAYBOOKS):
+            text = (ROOT / "ansible" / "playbooks" / name).read_text(encoding="utf-8")
+            task = self._task(text[text.index("\n  hosts: localhost\n"):], "ansible.builtin.command:\n        argv:")
+            calls.append(re.findall(r"^          - (.+)$", task, re.M))
+        assert calls[0] == calls[1] and len(calls[0]) == 6
+
+    def test_invocation(self, verify_play):
+        play_vars = verify_play.split("\n  tasks:\n", 1)[0]
+        assert ("ua_sign_verify: \"{{ ua_sign_verify_path | default('/opt/ua-sign-verify/cli/main.py') }}\""
+                in play_vars)
+        assert 'crash_marker: "Traceback (most recent call last):"' in play_vars
+        run = self._task(verify_play, "\"{{ ua_sign_verify }}\"\n          - \"{{ item }}\"")
+        argv = re.findall(r"^          - (.+)$", run, re.M)
+        assert argv == ["python3", '"{{ ua_sign_verify }}"', '"{{ item }}"', "--result-dir",
+                        '"{{ report_root }}/verified/{{ date_today }}"', "--no-console"]
+        assert "cmd:" not in run                     # argv: a path is never re-split by shlex
+        assert "failed_when: false" in run and "changed_when: false" in run
+        assert 'loop: "{{ todays_zips if verifier.stat.exists else [] }}"' in run
+
+    def test_verifier_is_checked_before_it_runs(self, verify_play):
+        names = [t.split("\n", 1)[0] for t in self._tasks(verify_play)]
+        check = next(i for i, t in enumerate(self._tasks(verify_play))
+                     if 'path: "{{ ua_sign_verify }}"' in t and "register: verifier" in t)
+        run = next(i for i, t in enumerate(self._tasks(verify_play)) if "register: verify_results" in t)
+        assert check < run, names
+
+    def test_one_classification_for_both_reports(self, verify_play):
+        classify = self._task(verify_play, "report_verify: >-")
+        assert ("'crash': item.rc | default(0) != 0 and crash_marker in (item.stderr | default(''))"
+                in classify)
+        assert "when:" not in classify               # computed always, not only for Telegram
+        summary = self._task(verify_play, "n_warn:")
+        assert "rejectattr('crash')" in summary and "outcomes: \"{{ report_verify | default([]) }}\"" in summary
+        assert "verifier.stat.exists" in summary
+        assert "verify_results.results" not in summary
+
+    def test_unverified_documents_fail_the_run(self, verify_play):
+        final = self._tasks(verify_play)[-1]
+        assert "unverified: \"{{ 0 if verifier.stat.exists else todays_zips | length }}\"" in final
+        assert "when: failed_workers | length > 0 or unverified | int > 0" in final
+
+    @pytest.mark.parametrize("script, rc, traceback", [
+        ("raise RuntimeError('verifier bug')", 1, True),     # crash → 1, like "warning"
+        ("import sys; sys.exit(1)", 1, False),                # a real warning
+        (None, 2, False),                                     # the script is not there
+    ])
+    def test_what_python_does_on_failure(self, tmp_path, script, rc, traceback):
+        """The facts crash_marker and the stat check rest on, on this interpreter."""
+        path = tmp_path / "main.py"
+        if script is not None:
+            path.write_text(script, encoding="utf-8")
+        r = subprocess.run([sys.executable, str(path)], capture_output=True, text=True, timeout=30)
+        assert r.returncode == rc
+        assert ("Traceback (most recent call last):" in r.stderr) is traceback

@@ -283,6 +283,12 @@
     lost_worker_error: >-
       connection to the worker was lost mid-run (UNREACHABLE), the reason is
       in the Ansible log
+    # ua-sign-verify on the controller. The contract the report relies on:
+    # exit 0 = valid, 1 = valid with a warning, anything else = error. Python
+    # itself exits 1 on an unhandled exception and 2 when the script file is
+    # missing; both are told apart separately (crash_marker, stat).
+    ua_sign_verify: "{{ ua_sign_verify_path | default('/opt/ua-sign-verify/cli/main.py') }}"
+    crash_marker: "Traceback (most recent call last):"
 
   tasks:
     # A worker that started the run (sedo_connection) but reached neither the
@@ -325,24 +331,53 @@
              | select('search', '/(' ~ (fetch_dates | join('|')) ~ ')/')
              | reject('search', '/verified/') | list }}
 
+    # Without this check a missing verifier gave exit 2 for every document,
+    # and the report showed N "signature errors" nobody had checked.
+    - name: Check that ua-sign-verify is installed
+      ansible.builtin.stat:
+        path: "{{ ua_sign_verify }}"
+      register: verifier
+
     - name: Run ua-sign-verify on each document
       ansible.builtin.command:
-        cmd: >-
-          python3 /opt/ua-sign-verify/cli/main.py "{{ item }}"
-          --result-dir "{{ report_root }}/verified/{{ date_today }}"
-          --no-console
-      loop: "{{ todays_zips }}"
+        argv:
+          - python3
+          - "{{ ua_sign_verify }}"
+          - "{{ item }}"
+          - --result-dir
+          - "{{ report_root }}/verified/{{ date_today }}"
+          - --no-console
+      loop: "{{ todays_zips if verifier.stat.exists else [] }}"
       register: verify_results
       changed_when: false
       failed_when: false
 
+    # Exit 1 with a traceback on stderr is the verifier crashing, not a
+    # warning: Python exits 1 on any unhandled exception. The Telegram report
+    # reads the same list, so both reports count alike.
+    - name: Classify ua-sign-verify results
+      ansible.builtin.set_fact:
+        report_verify: >-
+          {{ report_verify | default([]) + [{
+               'file': item.item,
+               'rc': item.rc | default(none),
+               'crash': item.rc | default(0) != 0 and crash_marker in (item.stderr | default(''))}] }}
+      loop: "{{ verify_results.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item | default('?') }}"
+
     - name: Summary report
+      vars:
+        outcomes: "{{ report_verify | default([]) }}"
+        n_valid: "{{ outcomes | selectattr('rc', 'eq', 0) | list | length }}"
+        n_warn: "{{ outcomes | selectattr('rc', 'eq', 1) | rejectattr('crash') | list | length }}"
       ansible.builtin.debug:
         msg: |
-          Total:    {{ verify_results.results | length }}
-          Valid:    {{ verify_results.results | selectattr('rc', 'eq', 0) | list | length }}
-          Warnings: {{ verify_results.results | selectattr('rc', 'eq', 1) | list | length }}
-          Errors:   {{ verify_results.results | selectattr('rc', 'ne', 0) | selectattr('rc', 'ne', 1) | list | length }}
+          Total:    {{ outcomes | length }}
+          Valid:    {{ n_valid }}
+          Warnings: {{ n_warn }}
+          Errors:   {{ outcomes | length - n_valid | int - n_warn | int }}
+          {% if not verifier.stat.exists %}ua-sign-verify not found ({{ ua_sign_verify }}): documents left unverified {{ todays_zips | length }}{% endif %}
 
     # Telegram report, only when vault.yml has telegram.bot_token. Summary,
     # token and chat go as one JSON on stdin, under no_log. Not through
@@ -362,14 +397,6 @@
       loop: "{{ groups['sedo_workers_linux'] | default([]) }}"
       when: telegram.bot_token | default('') | length > 0
 
-    - name: Collect verification results for the Telegram report
-      ansible.builtin.set_fact:
-        report_verify: "{{ report_verify | default([]) + [{'file': item.item, 'rc': item.rc | default(none)}] }}"
-      loop: "{{ verify_results.results | default([]) }}"
-      loop_control:
-        label: "{{ item.item | default('?') }}"
-      when: telegram.bot_token | default('') | length > 0
-
     - name: Send the report to Telegram
       ansible.builtin.command:
         cmd: python3 -m sedo.telegram_report --summary -
@@ -378,6 +405,8 @@
           {{ {'date': fetch_dates | join(', '),
               'workers': report_workers | default([]),
               'verify': report_verify | default([]),
+              'verifier_missing': none if verifier.stat.exists else ua_sign_verify,
+              'unverified': 0 if verifier.stat.exists else todays_zips | length,
               'telegram': {'bot_token': telegram.bot_token,
                            'chat_id': telegram.chat_id | default('')}} | to_json }}
       register: telegram_result
@@ -398,14 +427,21 @@
     # Workers that stopped in rescue are not marked failed (else the
     # verification play would not run). The run must still end in failure
     # for cron and monitoring; the reason is already in the reports above.
-    - name: Fail the run if any worker did not complete
+    # Likewise when documents were fetched but there is no verifier: they
+    # are unverified.
+    - name: Fail the run if a worker did not complete or documents went unverified
       ansible.builtin.fail:
         msg: >-
-          Workers with errors:
-          {% for h in failed_workers %}{{ h }} ({{ hostvars[h].sedo_worker_error | default(lost_worker_error) }}){{ '; ' if not loop.last }}{% endfor %}
+          {{ (([workers_msg] if failed_workers else [])
+               + ([verify_msg] if unverified | int > 0 else [])) | join('; ') }}
       vars:
         failed_workers: >-
           {{ groups['sedo_workers_linux'] | default([]) | map('extract', hostvars)
              | selectattr('sedo_worker_error', 'defined')
              | map(attribute='inventory_hostname') | list + lost_workers }}
-      when: failed_workers | length > 0
+        unverified: "{{ 0 if verifier.stat.exists else todays_zips | length }}"
+        workers_msg: >-
+          Workers with errors:
+          {% for h in failed_workers %}{{ h }} ({{ hostvars[h].sedo_worker_error | default(lost_worker_error) }}){{ '; ' if not loop.last }}{% endfor %}
+        verify_msg: "ua-sign-verify not found ({{ ua_sign_verify }}), documents left unverified: {{ unverified }}"
+      when: failed_workers | length > 0 or unverified | int > 0

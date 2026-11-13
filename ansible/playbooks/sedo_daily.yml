@@ -211,6 +211,12 @@
     lost_worker_error: >-
       зв'язок з воркером втрачено посеред прогону (UNREACHABLE), причина в
       лозі Ansible
+    # ua-sign-verify на контролері. Контракт, на який спирається звіт: код
+    # виходу 0 — валідний, 1 — валідний з попередженням, інше — помилка.
+    # Python сам виходить з 1 на необробленому винятку і з 2, коли файлу
+    # скрипта немає. Обидва випадки розпізнаються окремо: crash_marker і stat.
+    ua_sign_verify: "{{ ua_sign_verify_path | default('/opt/ua-sign-verify/cli/main.py') }}"
+    crash_marker: "Traceback (most recent call last):"
 
   tasks:
     # Воркер, що почав прогін (sedo_connection), але не дійшов ні до кінця
@@ -254,24 +260,53 @@
              | select('search', '/(' ~ (fetch_dates | join('|')) ~ ')/')
              | reject('search', '/verified/') | list }}
 
+    # Без цієї перевірки відсутній верифікатор давав код 2 на кожен документ,
+    # і звіт показував N «помилок підписів», хоча їх ніхто не перевіряв.
+    - name: Перевірити, що ua-sign-verify встановлено
+      ansible.builtin.stat:
+        path: "{{ ua_sign_verify }}"
+      register: verifier
+
     - name: Запустити ua-sign-verify на кожен
       ansible.builtin.command:
-        cmd: >
-          python3 /opt/ua-sign-verify/cli/main.py "{{ item }}"
-          --result-dir "{{ report_root }}/verified/{{ date_today }}"
-          --no-console
-      loop: "{{ todays_zips }}"
+        argv:
+          - python3
+          - "{{ ua_sign_verify }}"
+          - "{{ item }}"
+          - --result-dir
+          - "{{ report_root }}/verified/{{ date_today }}"
+          - --no-console
+      loop: "{{ todays_zips if verifier.stat.exists else [] }}"
       register: verify_results
       changed_when: false
       failed_when: false
 
+    # Код 1 з traceback у stderr — це падіння верифікатора, а не
+    # попередження: Python виходить з 1 на будь-якому необробленому винятку.
+    # Звідси ж і Telegram-звіт, тож обидва звіти рахують однаково.
+    - name: Розібрати результати ua-sign-verify
+      ansible.builtin.set_fact:
+        report_verify: >-
+          {{ report_verify | default([]) + [{
+               'file': item.item,
+               'rc': item.rc | default(none),
+               'crash': item.rc | default(0) != 0 and crash_marker in (item.stderr | default(''))}] }}
+      loop: "{{ verify_results.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item | default('?') }}"
+
     - name: Звіт
+      vars:
+        outcomes: "{{ report_verify | default([]) }}"
+        n_valid: "{{ outcomes | selectattr('rc', 'eq', 0) | list | length }}"
+        n_warn: "{{ outcomes | selectattr('rc', 'eq', 1) | rejectattr('crash') | list | length }}"
       ansible.builtin.debug:
         msg: |
-          Всього:   {{ verify_results.results | length }}
-          Валідних: {{ verify_results.results | selectattr('rc', 'eq', 0) | list | length }}
-          Warning:  {{ verify_results.results | selectattr('rc', 'eq', 1) | list | length }}
-          Помилки:  {{ verify_results.results | selectattr('rc', 'ne', 0) | selectattr('rc', 'ne', 1) | list | length }}
+          Всього:   {{ outcomes | length }}
+          Валідних: {{ n_valid }}
+          Warning:  {{ n_warn }}
+          Помилки:  {{ outcomes | length - n_valid | int - n_warn | int }}
+          {% if not verifier.stat.exists %}ua-sign-verify не знайдено ({{ ua_sign_verify }}): документів без перевірки {{ todays_zips | length }}{% endif %}
 
     # Telegram-звіт — лише коли у vault.yml заповнено telegram.bot_token.
     # Підсумок, токен і чат ідуть одним JSON у stdin, під no_log. Не через
@@ -291,14 +326,6 @@
       loop: "{{ groups['sedo_workers'] | default([]) }}"
       when: telegram.bot_token | default('') | length > 0
 
-    - name: Зібрати результати верифікації для Telegram-звіту
-      ansible.builtin.set_fact:
-        report_verify: "{{ report_verify | default([]) + [{'file': item.item, 'rc': item.rc | default(none)}] }}"
-      loop: "{{ verify_results.results | default([]) }}"
-      loop_control:
-        label: "{{ item.item | default('?') }}"
-      when: telegram.bot_token | default('') | length > 0
-
     - name: Надіслати звіт у Telegram
       ansible.builtin.command:
         cmd: python3 -m sedo.telegram_report --summary -
@@ -307,6 +334,8 @@
           {{ {'date': fetch_dates | join(', '),
               'workers': report_workers | default([]),
               'verify': report_verify | default([]),
+              'verifier_missing': none if verifier.stat.exists else ua_sign_verify,
+              'unverified': 0 if verifier.stat.exists else todays_zips | length,
               'telegram': {'bot_token': telegram.bot_token,
                            'chat_id': telegram.chat_id | default('')}} | to_json }}
       register: telegram_result
@@ -326,15 +355,21 @@
 
     # Воркери, що зупинились у rescue, не позначені failed (інакше play
     # верифікації не запустився б). Прогін має все одно завершитись з
-    # помилкою — для cron і моніторингу; причина вже у звітах вище.
-    - name: Завершити з помилкою, якщо хоч один воркер не відпрацював
+    # помилкою — для cron і моніторингу; причина вже у звітах вище. Так само,
+    # коли документи завантажено, а верифікатора немає: вони не перевірені.
+    - name: Завершити з помилкою, якщо воркер не відпрацював чи документи не перевірено
       ansible.builtin.fail:
         msg: >-
-          Воркери з помилкою:
-          {% for h in failed_workers %}{{ h }} ({{ hostvars[h].sedo_worker_error | default(lost_worker_error) }}){{ '; ' if not loop.last }}{% endfor %}
+          {{ (([workers_msg] if failed_workers else [])
+               + ([verify_msg] if unverified | int > 0 else [])) | join('; ') }}
       vars:
         failed_workers: >-
           {{ groups['sedo_workers'] | default([]) | map('extract', hostvars)
              | selectattr('sedo_worker_error', 'defined')
              | map(attribute='inventory_hostname') | list + lost_workers }}
-      when: failed_workers | length > 0
+        unverified: "{{ 0 if verifier.stat.exists else todays_zips | length }}"
+        workers_msg: >-
+          Воркери з помилкою:
+          {% for h in failed_workers %}{{ h }} ({{ hostvars[h].sedo_worker_error | default(lost_worker_error) }}){{ '; ' if not loop.last }}{% endfor %}
+        verify_msg: "ua-sign-verify не знайдено ({{ ua_sign_verify }}), документів не перевірено: {{ unverified }}"
+      when: failed_workers | length > 0 or unverified | int > 0

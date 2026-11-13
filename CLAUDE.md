@@ -95,6 +95,10 @@ play верифікації, і звіт не надсилався б саме �
 `localhost`-якір, і в play верифікації `lost_workers` підбирає воркерів, з
 якими зв'язок обірвався посеред прогону (`TestUnreachableWorker`). Не додавай
 `ignore_unreachable`: тоді наступні task-и виконуються наосліп.
+`ua-sign-verify` запускається через `argv` після `stat` (без верифікатора
+Python дав би код 2 на кожен документ, і звіт показав би «помилки підписів»).
+Код 1 з traceback — збій, а не попередження. Обидва звіти рахують з одного
+`report_verify` (`TestVerifierContract`).
 
 Кореневі `sedo_client.py`, `iit_client.py`, `opensc_signer.py`,
 `pkcs11_signer.py` та інші старі імена — **шими**: як скрипт запускають ту
