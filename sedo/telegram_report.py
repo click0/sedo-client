@@ -19,13 +19,18 @@ Year:     2025-2026
      "workers": [{"host": "ws01", "rc": 0, "stdout": "...Документів: 3..."},
                  {"host": "ws02", "rc": null,
                   "error": "Зупинити якщо DLL відсутня: PKCS#11 модуль не знайдено"}],
-     "verify": [{"file": "/opt/sedo-reports/ws01/2026-11-06/doc-1.zip", "rc": 0}]}
+     "verify": [{"file": "/opt/sedo-reports/ws01/2026-11-06/doc-1.zip", "rc": 0,
+                 "crash": false}],
+     "verifier_missing": null, "unverified": 0}
 
 ``rc`` воркера — код виходу sedo-client (null: клієнт не запускався);
 ``error`` — крок, на якому воркер зупинився, і його повідомлення (rescue у
 плейбуку); коли є, показується замість коду;
 ``rc`` верифікації — код ua-sign-verify (0 валідний, 1 попередження, інше —
-помилка), як у task-і «Звіт».
+помилка), як у task-і «Звіт». ``crash`` — ненульовий код із traceback у
+stderr: верифікатор упав (Python виходить з 1 на винятку), це помилка, а не
+попередження. ``verifier_missing`` — шлях до ua-sign-verify, якого на
+контролері немає; ``unverified`` — скільки документів через це не перевірено.
 
 Токен і чат ніколи не йдуть через argv (командний рядок видно в списку
 процесів). Плейбук кладе їх у той самий JSON на stdin, ключем
@@ -98,22 +103,29 @@ def build_report(summary: dict) -> str:
     """Plain text (no parse_mode: nothing to escape), at most MAX_LEN characters."""
     workers = summary.get("workers") or []
     verify = summary.get("verify") or []
-    rcs = [v.get("rc") for v in verify]
-    valid, warn = rcs.count(0), rcs.count(1)
-    errors = [v for v in verify if v.get("rc") not in (0, 1)]
+    missing = summary.get("verifier_missing")
+    valid = sum(1 for v in verify if v.get("rc") == 0)
+    warn = sum(1 for v in verify if v.get("rc") == 1 and not v.get("crash"))
+    errors = [v for v in verify if v.get("rc") not in (0, 1) or v.get("crash")]
     failed_workers = [w for w in workers if w.get("rc") != 0 or w.get("error")]
 
-    ok = not errors and not failed_workers
+    ok = not errors and not failed_workers and not missing
     lines = [f"{'✅' if ok else '⚠️'} СЕДО ЗСУ, щоденний прогін {summary.get('date') or '?'}"]
     if workers:
         lines.append("Воркери:")
         lines += [_worker_line(w) for w in workers]
-    lines.append(f"Підписи: усього {len(verify)}, валідних {valid}, "
-                 f"з попередженням {warn}, помилок {len(errors)}")
+    if missing:
+        # Not "N errors": nobody checked these signatures at all.
+        lines.append(f"Підписи НЕ перевірено: ua-sign-verify не знайдено ({missing}), "
+                     f"документів без перевірки {summary.get('unverified') or 0}")
+    else:
+        lines.append(f"Підписи: усього {len(verify)}, валідних {valid}, "
+                     f"з попередженням {warn}, помилок {len(errors)}")
     if errors:
         lines.append("Помилки верифікації:")
         for v in errors[:MAX_ERROR_LINES]:
-            lines.append(f"  {_short(str(v.get('file', '?')))} (код {v.get('rc')})")
+            why = "збій верифікатора" if v.get("crash") else f"код {v.get('rc')}"
+            lines.append(f"  {_short(str(v.get('file', '?')))} ({why})")
         if len(errors) > MAX_ERROR_LINES:
             lines.append(f"  … і ще {len(errors) - MAX_ERROR_LINES}")
     text = "\n".join(lines)

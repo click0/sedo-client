@@ -55,7 +55,10 @@ Everything runs unattended — no operator prompts.
 
 To complete the server integration, run `scripts/fiddler_analyze.py` on a
 SAZ capture of a real login session and update the `_flow_*` methods and
-API paths accordingly. See [`FIDDLER-CAPTURE-GUIDE.md`](FIDDLER-CAPTURE-GUIDE.md).
+API paths accordingly. Its report (`--output fiddler_report.txt`) shows the
+flow request by request, including the IIT agent calls, as structure only.
+Values are masked, so the report can be handed over; the `.saz` itself should
+not be. See [`FIDDLER-CAPTURE-GUIDE.md`](FIDDLER-CAPTURE-GUIDE.md).
 The contract for those steps is already written: `tests/test_sedo_contract.py`
 (unimplemented parts are `xfail(strict=True)`); the summary is
 [`docs/TODO.md`](docs/TODO.md).
@@ -196,7 +199,7 @@ sedo-client/
 │   ├── test_versions.py        — Version: headers vs pyproject
 │   └── test_shims.py           — the old top-level names still work
 ├── scripts/
-│   ├── fiddler_analyze.py      — parses a Fiddler SAZ capture
+│   ├── fiddler_analyze.py      — Fiddler SAZ → login flow, structure only
 │   ├── smoke_test.py           — quick environment check
 │   ├── build_binary.py         — PyInstaller onefile helper
 │   ├── iit_unpack.sh           — unpacks an IIT installer without running it
@@ -345,7 +348,13 @@ or, from the web UI: *Releases → Draft a new release → Choose a tag → type
 
 - **ua-sign-verify** ([github.com/click0](https://github.com/click0)) —
   verifier for DSTU 4145 / Kupyna / GOST 34.311 KEP signatures, used on the
-  Linux controller to verify documents after they are downloaded.
+  Linux controller to verify documents after they are downloaded. The
+  playbooks run `python3 /opt/ua-sign-verify/cli/main.py <zip> --result-dir
+  <dir> --no-console`; another location goes in `ua_sign_verify_path`. Exit
+  codes they rely on: 0 valid, 1 valid with a warning, anything else an error.
+  If the verifier is missing, the report says the documents were not
+  verified, rather than counting them as signature errors. Exit 1 with a
+  Python traceback counts as a verifier crash, not a warning.
 
 ## Links
 
