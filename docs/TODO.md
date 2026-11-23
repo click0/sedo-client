@@ -58,6 +58,7 @@ Year:     2025-2026
 | `changed_when` обох playbook-ів шукає `Документів: [1-9]` у stdout | `TestCLIContract::test_fetch_prints_what_the_playbook_parses` |
 | Playbook-и передають лише прапорці, які знає парсер | `TestCLIContract::test_playbooks_only_pass_flags_the_parser_knows` |
 | 0 документів — не `changed` | `TestCLIContract::test_zero_documents_is_not_changed` |
+| PIN у `vault.yml` — рядок у лапках: без лапок YAML читає `0123` як 83, і воркер зупиняється до запуску клієнта; `config_local.toml` з шаблону читається клієнтом за будь-яких імен профілів | `TestQuotedPins`, `TestConfigTemplate` |
 | Верифікація `ua-sign-verify` на контролері: виклик однаковий в обох плейбуках, код 0 — валідний, 1 — попередження, інше — помилка; відсутній верифікатор — «не перевірено», а не «помилки підписів»; падіння (код 1 + traceback) — помилка | `TestVerifierContract`, `TestBuildReport` |
 
 ## 5. Звіт — готово

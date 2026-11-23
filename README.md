@@ -156,7 +156,8 @@ Remove-Item Env:SEDO_PIN
 ```bash
 cd ansible
 ansible-vault create inventory/vault.yml
-# (format — see vault.yml.example)
+# (format — see vault.yml.example; PINs must be in quotes:
+#  without them YAML reads 0123 as the number 83, and the playbook stops the worker)
 
 ansible-playbook -i inventory/hosts.yml playbooks/sedo_daily.yml --ask-vault-pass
 
@@ -270,7 +271,11 @@ is the ordinary single-key setup — with no local file nothing changes. Two
 profiles on one token (two CKA_IDs) share a session; two tokens mean two
 sessions and two PINs. PINs are never stored: a profile reads
 `SEDO_PIN_<NAME>` (the `auth` key also accepts plain `SEDO_PIN`), a `pin_file`,
-or asks interactively. `--sign-file FILE` signs a file with the `sign` profile
+or asks interactively. A `pin_file` is one line of UTF-8 (a BOM, and UTF-16
+with a BOM as PowerShell 5 writes it, are read; a second line or an invisible
+character is an error, not a PIN). If two profiles end up with the same default
+variable (names in Cyrillic both give `SEDO_PIN__`), the client stops and asks
+for a `pin_env`. `--sign-file FILE` signs a file with the `sign` profile
 without touching SEDO — the way to check the document key today, since SEDO's
 own document-signing endpoints still need a Fiddler capture.
 
