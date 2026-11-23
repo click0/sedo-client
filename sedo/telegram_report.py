@@ -46,6 +46,7 @@ stderr: верифікатор упав (Python виходить з 1 на ви�
 """
 
 import argparse
+import http.client
 import json
 import os
 import re
@@ -60,13 +61,16 @@ __all__ = ["build_report", "send", "count_documents", "TOKEN_ENV", "CHAT_ENV", "
 TELEGRAM_API = "https://api.telegram.org"
 TOKEN_ENV = "SEDO_TELEGRAM_TOKEN"
 CHAT_ENV = "SEDO_TELEGRAM_CHAT"
-MAX_LEN = 4096                      # sendMessage text limit
+MAX_LEN = 4096                      # sendMessage text limit, in UTF-16 code units
 MAX_ERROR_LINES = 20
 
 # "<bot id>:<secret>", as BotFather issues it. vault.yml.example's placeholder
 # ("1234567890:ABCDEF...") does not match, so a copied example is reported
 # instead of being sent to Telegram every morning.
-_TOKEN_RE = re.compile(r"^\d{5,}:[A-Za-z0-9_-]{30,}$")
+# Used with fullmatch, ASCII digits only: "^…$" let "<token>\n" through (a
+# vault.yml block scalar), http.client then refused the URL with InvalidURL,
+# and that message — the URL, token included — reached stderr in a traceback.
+_TOKEN_RE = re.compile(r"[0-9]{5,}:[A-Za-z0-9_-]{30,}")
 # The line the playbooks' changed_when greps (sedo.client main()).
 _DOCS_RE = re.compile(r"Документів:\s*(\d+)")
 
@@ -77,7 +81,7 @@ class ReportError(RuntimeError):
 
 def count_documents(stdout: str) -> Optional[int]:
     """Documents a worker fetched, from sedo-client's "📄 Документів: N", or None."""
-    m = _DOCS_RE.search(stdout or "")
+    m = _DOCS_RE.search(stdout) if isinstance(stdout, str) else None
     return int(m.group(1)) if m else None
 
 
@@ -99,10 +103,34 @@ def _worker_line(w: dict) -> str:
     return f"  ✓ {host}: " + (f"документів {docs}" if docs is not None else "без завантаження")
 
 
+def _objects(summary: dict, key: str) -> list:
+    """summary[key] as a list of objects; ValueError (→ exit 2) for anything else."""
+    value = summary.get(key) or []
+    if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
+        raise ValueError(f"'{key}' must be a list of objects")
+    return value
+
+
+def _fit(text: str) -> str:
+    """
+    ``text`` within MAX_LEN UTF-16 code units, ending in "…" when it was cut.
+
+    Code units, not code points: that is the unit the Bot API counts in, and a
+    character outside the BMP (most emoji) takes two. Cut by code points, a
+    long report with such characters was still over the limit — refused as
+    "message is too long" on the very morning there was a lot to report.
+    """
+    units = text.encode("utf-16-le", "surrogatepass")
+    if len(units) // 2 <= MAX_LEN:
+        return text
+    # "ignore" drops the half of a surrogate pair the cut may leave at the end.
+    return units[:(MAX_LEN - 1) * 2].decode("utf-16-le", "ignore") + "…"
+
+
 def build_report(summary: dict) -> str:
-    """Plain text (no parse_mode: nothing to escape), at most MAX_LEN characters."""
-    workers = summary.get("workers") or []
-    verify = summary.get("verify") or []
+    """Plain text (no parse_mode: nothing to escape), at most MAX_LEN UTF-16 units."""
+    workers = _objects(summary, "workers")
+    verify = _objects(summary, "verify")
     missing = summary.get("verifier_missing")
     valid = sum(1 for v in verify if v.get("rc") == 0)
     warn = sum(1 for v in verify if v.get("rc") == 1 and not v.get("crash"))
@@ -128,10 +156,7 @@ def build_report(summary: dict) -> str:
             lines.append(f"  {_short(str(v.get('file', '?')))} ({why})")
         if len(errors) > MAX_ERROR_LINES:
             lines.append(f"  … і ще {len(errors) - MAX_ERROR_LINES}")
-    text = "\n".join(lines)
-    if len(text) > MAX_LEN:
-        text = text[:MAX_LEN - 1] + "…"
-    return text
+    return _fit("\n".join(lines))
 
 
 def _post_json(url: str, payload: dict, timeout: float) -> tuple:
@@ -157,17 +182,24 @@ def send(token: str, chat_id: str, text: str, *, api_base: Optional[str] = None,
     could silently send the bot token to another host.
     """
     api_base = api_base or TELEGRAM_API
-    if not _TOKEN_RE.match(token or ""):
+    if not _TOKEN_RE.fullmatch(token or ""):
         raise ReportError("the bot token does not look like '<digits>:<secret>' "
                           "(vault.yml still holds the example?)")
     if not str(chat_id or "").strip():
         raise ReportError("no chat id")
     url = f"{api_base.rstrip('/')}/bot{token}/sendMessage"
     post = post or _post_json
+    # Not only URLError / OSError: http.client.InvalidURL and ValueError quote
+    # the URL in their message, and the URL holds the token. Raised after the
+    # except block: "from None" only hides __context__ from the traceback, the
+    # original exception — URL and all — would still hang off the ReportError.
+    failure = None
     try:
         status, body = post(url, {"chat_id": chat_id, "text": text}, timeout)
-    except (urllib.error.URLError, OSError) as e:
-        raise ReportError(f"Telegram unreachable: {e}".replace(token, "***")) from None
+    except (urllib.error.URLError, OSError, http.client.HTTPException, ValueError) as e:
+        failure = f"Telegram unreachable: {e}"
+    if failure is not None:
+        raise ReportError(failure.replace(token, "***"))
     if status == 200 and isinstance(body, dict) and body.get("ok") is True:
         return
     desc = body.get("description") if isinstance(body, dict) else None
@@ -206,8 +238,9 @@ def main(argv=None) -> int:
     if args.dry_run:
         print(text)
         return 0
-    token = str(creds.get("bot_token") or os.environ.get(TOKEN_ENV, ""))
-    chat = str(creds.get("chat_id") or os.environ.get(CHAT_ENV, ""))
+    # strip: a YAML block scalar in vault.yml leaves a newline after the value.
+    token = str(creds.get("bot_token") or os.environ.get(TOKEN_ENV, "")).strip()
+    chat = str(creds.get("chat_id") or os.environ.get(CHAT_ENV, "")).strip()
     if not token or not chat:
         print(f"no credentials: 'telegram' in the summary, or ${TOKEN_ENV} and ${CHAT_ENV} "
               "(or --dry-run)", file=sys.stderr)

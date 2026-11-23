@@ -113,7 +113,7 @@ def _as_port(value) -> Optional[int]:
             port = int(text, 16) if text.startswith("0x") else int(text)
         else:
             port = int(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):        # OverflowError: int(inf)
         log.warning("Ignoring non-numeric agent port in registry: %r", value)
         return None
     if not 0 < port < 65536:
@@ -461,7 +461,10 @@ def verify_agent(host: str = "127.0.0.1", port: int = 8081,
         if r.status_code != 200:
             return False
         data = r.json()
-    except (requests.exceptions.RequestException, ValueError):
+    except (requests.exceptions.RequestException, ValueError, RecursionError):
+        # RecursionError: "[[[[…" thousands deep from whatever listens on the
+        # port. Not ValueError, so it escaped discovery instead of meaning
+        # "this is not the agent".
         return False
     if not isinstance(data, dict):
         return False
@@ -537,6 +540,15 @@ RPC_ERRORS = {
     -32400: "System error",
     -32300: "Transport error",
 }
+
+
+def _scrub(text: str, params) -> str:
+    """``text`` without the string parameters of a call (the PIN / password)."""
+    values = params.values() if isinstance(params, dict) else (params or [])
+    for value in values:
+        if isinstance(value, str) and value:
+            text = text.replace(value, "***")
+    return text
 
 
 _HEX_RE = re.compile(r"^(?:[0-9A-Fa-f]{2})+$")
@@ -679,8 +691,8 @@ class IITClient:
             payload["session_id"] = self._session_id
 
         # Never log params for PIN-carrying methods (would leak the PIN at -v).
-        log.debug("→ %s(%s)", method,
-                  "[***]" if method in _REDACTED_METHODS else params)
+        secret = method in _REDACTED_METHODS
+        log.debug("→ %s(%s)", method, "[***]" if secret else params)
         try:
             try:
                 r = self.session.post(self.base_url, json=payload, timeout=self.timeout)
@@ -703,14 +715,16 @@ class IITClient:
         # ERROR level — and for a PIN-carrying method that body starts with the
         # request JSON we just sent. _REDACTED_METHODS must gate this too, not
         # only the log.debug above.
-        body = "[***]" if method in _REDACTED_METHODS else r.text[:200]
+        body = "[***]" if secret else r.text[:200]
 
         if r.status_code != 200:
             raise IITRPCError(r.status_code, f"HTTP {r.status_code}: {body}")
 
         try:
             data = r.json()
-        except ValueError as e:
+        except (ValueError, RecursionError) as e:
+            # RecursionError: JSON nested thousands deep (Python 3.11 raises it
+            # from the decoder). Like non-JSON, it must stay inside IITError.
             raise IITRPCError(-1, f"Agent returned non-JSON: {body}") from e
 
         # Everything below does .get() on the envelope and on "error". A list or
@@ -731,13 +745,23 @@ class IITClient:
                 code, message, err_data = -1, str(err), None
             try:
                 code = int(code)
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
+                # OverflowError: {"code": 1e999} is valid for Python's json
+                # (inf) and int(inf) is not a ValueError — it escaped past
+                # every "except IITError", sign_data's fallback included.
                 code = -1
             # An agent that reports the error as a bare string still means
             # "method not found" — keep the -32601 contract callers rely on.
             if code == -1 and "method not found" in str(message).lower():
                 code = -32601
-            raise IITRPCError(code, str(message), err_data)
+            message = str(message)
+            if secret:
+                # An agent that quotes the offending parameters in its error
+                # ("Invalid method parameters: [..., '1234']") would hand the
+                # PIN to the exception, and main() prints that at ERROR — the
+                # same reason the HTTP error body above is not echoed.
+                message, err_data = _scrub(message, params), None
+            raise IITRPCError(code, message, err_data)
 
         result = data.get("result")
 
@@ -746,7 +770,7 @@ class IITClient:
         if "session_id" in data and data["session_id"]:
             self._session_id = data["session_id"]
 
-        log.debug("← %s", result)
+        log.debug("← %s", "[***]" if secret else result)
         return result
 
     # ─── Життєвий цикл ───────────────────────────────────────

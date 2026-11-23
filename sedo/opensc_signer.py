@@ -41,8 +41,11 @@ def parse_sign_mechanisms(lines) -> list[int]:
         if not m:
             continue
         flags = {f.strip() for f in m.group(2).split(",")}
-        if "sign" in flags:
-            out.append(int(m.group(1), 16))
+        mech = int(m.group(1), 16)
+        # CK_MECHANISM_TYPE is 32 bits; a longer run of hex digits is not an
+        # id, and "0x" + 40 digits would go to pkcs11-tool as --mechanism.
+        if "sign" in flags and mech <= 0xFFFFFFFF:
+            out.append(mech)
     return out
 
 
@@ -300,7 +303,7 @@ class OpenSCSigner:
             if r.returncode != 0:
                 stderr = r.stderr.decode("utf-8", errors="replace")
                 raise RuntimeError(f"read-object failed: {stderr}")
-            blob = Path(out_path).read_bytes()
+            blob = self._read_output(out_path)
             if not blob:
                 # rc=0 but nothing written — e.g. wrong CKA_ID; don't let an
                 # empty cert flow into authorize() as "0 bytes".
@@ -310,6 +313,20 @@ class OpenSCSigner:
             return blob
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
+
+    @staticmethod
+    def _read_output(path: str) -> bytes:
+        """
+        What pkcs11-tool wrote to --output-file; b"" when it wrote no file.
+
+        Exit code 0 with no file ended in FileNotFoundError on a temp path —
+        an OSError, which authorize() does not collect like the RuntimeError
+        every backend raises, and which says nothing about the cause.
+        """
+        try:
+            return Path(path).read_bytes()
+        except FileNotFoundError:
+            return b""
 
     def sign(self, data: bytes) -> bytes:
         """Підпис даних через --sign."""
@@ -338,7 +355,7 @@ class OpenSCSigner:
             if r.returncode != 0:
                 stderr = r.stderr.decode("utf-8", errors="replace")
                 raise RuntimeError(f"sign failed: {stderr}")
-            sig = Path(out_path).read_bytes()
+            sig = self._read_output(out_path)
             if not sig:
                 raise RuntimeError("pkcs11-tool produced an empty signature")
             return sig

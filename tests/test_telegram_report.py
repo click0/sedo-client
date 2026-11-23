@@ -176,7 +176,7 @@ class TestSend:
         with pytest.raises(tr.ReportError, match="unreachable") as e:
             tr.send(TOKEN, "1", "x", api_base=f"http://127.0.0.1:{port}", timeout=2)
         assert TOKEN not in str(e.value)
-        assert e.value.__suppress_context__                 # the URLError chain stays out of tracebacks
+        assert e.value.__context__ is None                  # nothing with the URL hangs off the error
 
     @pytest.mark.parametrize("token", ["1234567890:ABCDEF...", "", "nocolon", "12:short"])
     def test_malformed_token_never_hits_the_network(self, token):

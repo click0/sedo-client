@@ -9,7 +9,13 @@ PIN, ідентифікатори й вміст документів у ньом
 методи й шляхи (ідентифікатори в шляху → {id}), назви параметрів, полів
 JSON і cookie, типи та довжини значень, коди відповідей, Content-Type.
 Значення показано лише для невеликих чисел і для технічних полів
-(``_SHOWN_KEYS``: alg, status, response_type…).
+(``_SHOWN_KEYS``: alg, status, response_type…), і то лише коли це одне
+технічне слово (``RS256``, ``invalid_grant``), а не речення.
+
+Усе, що друкується дослівно, спершу перевіряється на форму: назва схеми,
+методу, заголовка, розширення файлу. Те, що на назву не схоже, показується
+як ``str(N)``: значення без назви (``?<квиток>``, ``Authorization: <токен>``
+без схеми, cookie без ``=``) — це значення, а не структура.
 
 Використання (Windows — PowerShell, з каталогу клієнта):
     .\\venv\\Scripts\\python.exe scripts\\fiddler_analyze.py sedo_login_reference.saz --output fiddler_report.txt
@@ -31,7 +37,7 @@ import zipfile
 import zlib
 from collections import Counter
 from pathlib import Path, PurePosixPath
-from urllib.parse import parse_qsl, unquote, urlsplit
+from urllib.parse import parse_qsl, unquote, unquote_plus, urlsplit
 
 # JSON-RPC methods whose params carry the token PIN. Duplicated from
 # iit_client (scripts/ stays import-free of the package) — keep in sync.
@@ -69,6 +75,35 @@ _MAX_DEPTH = 6
 _MAX_KEYS = 40
 _SMALL_INT = 1000
 
+# What may be printed as is has to LOOK like the thing it is meant to be.
+# Everything below is matched with fullmatch.
+_TOKEN = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+")           # RFC 9110 token: a header name
+_SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9-]{0,19}")           # Bearer, Basic, Negotiate, attachment
+_HTTP_METHOD = re.compile(r"[A-Z]{1,12}")
+_RPC_METHOD = re.compile(r"[A-Za-z_][A-Za-z0-9_.]{0,63}")
+_MEDIA_TYPE = re.compile(r"[A-Za-z0-9!#$&^_.+-]{1,60}/[A-Za-z0-9!#$&^_.+-]{1,80}")
+_HOSTNAME = re.compile(r"[A-Za-z0-9.-]{1,253}")
+_ATTR_NAME = re.compile(r"[A-Za-z-]{1,20}")
+# A technical word under a shown key: RS256, invalid_grant, application/json.
+_TECH_WORD = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:/+-]*")
+# An extension: short, ASCII, with a letter. "Петренко І.В" has the suffix ".В",
+# "звіт 01.2026" — ".2026": parts of a title, not extensions.
+_EXTENSION = re.compile(r"\.(?=[a-z0-9]*[a-z])[a-z0-9]{1,8}")
+_HEX_KEY = re.compile(r"[0-9a-fA-F]{16,}")
+
+
+def _named(pattern, text: str, fallback: str = "?") -> str:
+    """``text`` if it has the form of a name, else ``fallback`` — never the text."""
+    return text if pattern.fullmatch(text) else fallback
+
+
+def _ext(filename: str) -> str:
+    """".pdf" for a file name; "" without an extension, "(other)" for a suffix that is not one."""
+    suffix = PurePosixPath(filename).suffix.lower()
+    if not suffix:
+        return ""
+    return suffix if _EXTENSION.fullmatch(suffix) else "(other)"
+
 
 def parse_saz(saz_path: Path) -> list[dict]:
     """Парсить SAZ файл (ZIP с sessions всередині)."""
@@ -79,11 +114,11 @@ def parse_saz(saz_path: Path) -> list[dict]:
         req_files = {}
         resp_files = {}
         for name in zf.namelist():
-            m = re.match(r'raw/(\d+)_c\.txt$', name)
+            m = re.match(r'raw/(\d{1,9})_c\.txt$', name)
             if m:
                 req_files[int(m.group(1))] = name
                 continue
-            m = re.match(r'raw/(\d+)_s\.txt$', name)
+            m = re.match(r'raw/(\d{1,9})_s\.txt$', name)
             if m:
                 resp_files[int(m.group(1))] = name
 
@@ -137,17 +172,22 @@ def classify_session(sess: dict) -> dict:
 
 def split_http(raw: bytes) -> tuple:
     """(start line, {lower name: [values]}, [(name as sent, value)], decoded body)."""
-    head, sep, body = raw.partition(b"\r\n\r\n")
-    if not sep:
-        head, sep, body = raw.partition(b"\n\n")
+    # The FIRST blank line, whatever the line endings. Looking for CRLFCRLF
+    # first found the end of a chunked body when the headers ended in LF only,
+    # and the body was then read as headers.
+    m = re.search(rb"\r?\n\r?\n", raw)
+    head, body = (raw[:m.start()], raw[m.end():]) if m else (raw, b"")
     lines = head.decode("latin-1").splitlines()
     headers: dict = {}
     pairs = []
     for line in lines[1:]:
         name, colon, value = line.partition(":")
-        if colon:
-            headers.setdefault(name.strip().lower(), []).append(value.strip())
-            pairs.append((name.strip(), value.strip()))
+        # A header name is a token. Without the check any line with a colon
+        # was a "header", and a name that matched _SECRET_HEADER was printed
+        # as is: a line of a JSON body, say, up to its "session_id":.
+        if colon and _TOKEN.fullmatch(name):
+            headers.setdefault(name.lower(), []).append(value.strip())
+            pairs.append((name, value.strip()))
     return (lines[0].strip() if lines else ""), headers, pairs, _decode_body(headers, body)
 
 
@@ -240,16 +280,24 @@ def _jwt_shape(s: str) -> str:
 
 def _key(k) -> str:
     k = str(k)
-    if _UUID.match(k) or re.search(r"\d{5,}", k) or len(k) > 40:
+    # A name that is really a value: an id, a hash (a CSRF token used as the
+    # field NAME, an object keyed by document hashes), an address.
+    if (_UUID.match(k) or re.search(r"\d{5,}", k) or len(k) > 40
+            or _HEX_KEY.fullmatch(k) or "@" in k):
         return "<id>"
     return k
 
 
 def str_shape(s: str, key=None) -> str:
     n = len(s)
-    if (key and str(key).lower() in _SHOWN_KEYS and n <= 40
+    if (key and str(key).lower() in _SHOWN_KEYS and 0 < n <= 40
             and not re.search(r"\d{5,}", s) and "@" not in s):
-        return json.dumps(s, ensure_ascii=False)
+        # One technical word; "scope" is a space-separated list of them. A
+        # sentence under "error" or "status" ("Користувача … не знайдено") is
+        # a value like any other and shows as str(N).
+        words = s.split(" ") if str(key).lower() == "scope" else [s]
+        if all(_TECH_WORD.fullmatch(w) for w in words):
+            return json.dumps(s, ensure_ascii=False)
     if not s:
         return '""'
     if _DATE.match(s):
@@ -324,13 +372,21 @@ def _segment(seg: str) -> str:
 
 
 def mask_query(q: str) -> str:
-    pairs = parse_qsl(q, keep_blank_values=True)
-    if not pairs:
-        return f"str({len(q)})" if q else ""
     out = []
-    for k, v in pairs:
-        value = v if v.isdigit() and int(v) < _SMALL_INT else str_shape(v, k)
-        out.append(f"{_key(k)}={value}")
+    for part in q.split("&"):
+        if not part:
+            continue
+        k, eq, v = part.partition("=")
+        k, v = unquote_plus(k), unquote_plus(v)
+        if not eq:
+            # "?<ticket>", "#<access token>", "#/inbox/<id>": no name, so the
+            # word is the value. It used to be printed as a parameter name.
+            out.append(str_shape(k))
+            continue
+        # isascii and the length: "²".isdigit() is true and int("²") raises;
+        # so does int() of 5000 digits.
+        small = v.isascii() and v.isdigit() and len(v) <= 3
+        out.append(f"{_key(k)}={v if small else str_shape(v, k)}")
     return "&".join(out)
 
 
@@ -365,37 +421,48 @@ def mask_url(url: str) -> str:
 
 def _cookie_attr(attr: str) -> str:
     name, _, value = attr.strip().partition("=")
-    name = name.strip()
+    name, value = _named(_ATTR_NAME, name.strip(), "(attribute)"), value.strip()
     if name.lower() == "path":
-        return f"{name}={mask_url(value.strip())}"
-    if name.lower() in ("domain", "samesite"):
-        return f"{name}={value.strip()}"
+        return f"{name}={mask_url(value)}"
+    if name.lower() == "domain":
+        return f"{name}={_named(_HOSTNAME, value)}"
+    if name.lower() == "samesite":
+        return f"{name}={_named(_ATTR_NAME, value)}"
     return name
+
+
+def _cookie_name(pair: str) -> str:
+    """The name of a ``name=value`` cookie. Without "=" there is no name: the text is the value."""
+    name, eq, _ = pair.partition("=")
+    return _key(name.strip()) if eq and name.strip() else "(no name)"
 
 
 def header_line(name: str, value: str):
     n = name.lower()
     if n == "content-type":
-        return f"Content-Type: {value.split(';')[0].strip()}"
+        return f"Content-Type: {_named(_MEDIA_TYPE, value.split(';')[0].strip())}"
     if n in ("location", "origin", "referer", "content-location"):
         return f"{name}: {mask_url(value)}"
     if n == "cookie":
-        names = [c.split("=", 1)[0].strip() for c in value.split(";") if c.strip()]
-        return "Cookie: " + ", ".join(names)
+        return "Cookie: " + ", ".join(_cookie_name(c) for c in value.split(";") if c.strip())
     if n == "set-cookie":
         cookie, *attrs = value.split(";")
         attrs = [_cookie_attr(a) for a in attrs if a.strip()]
-        return f"Set-Cookie: {cookie.split('=', 1)[0].strip()} ({'; '.join(attrs)})"
+        return f"Set-Cookie: {_cookie_name(cookie)} ({'; '.join(attrs)})"
     if n in ("authorization", "proxy-authorization"):
-        scheme, _, credential = value.partition(" ")
-        return f"{name}: {scheme} {str_shape(credential.strip())}".rstrip()
+        # "Authorization: <token>" with no scheme is what some APIs send: the
+        # first word was printed as the scheme — the token itself.
+        words = value.split()
+        if len(words) > 1 and _SCHEME.fullmatch(words[0]):
+            return f"{name}: {words[0]} {str_shape(' '.join(words[1:]))}"
+        return f"{name}: {str_shape(value.strip())}"
     if n == "www-authenticate":
-        return f"WWW-Authenticate: {value.split(' ')[0]}"
+        return f"WWW-Authenticate: {_named(_SCHEME, (value.split() or [''])[0])}"
     if n == "content-disposition":
         m = re.search(r"filename\*?=(?:UTF-8'')?\"?([^\";]+)", value, re.I)
-        suffix = PurePosixPath(unquote(m.group(1))).suffix if m else ""
-        return f"Content-Disposition: {value.split(';')[0].strip()}" + (
-            f"; filename=*{suffix}" if m else "")
+        kind = _named(_SCHEME, value.split(";")[0].strip())
+        return f"Content-Disposition: {kind}" + (
+            f"; filename=*{_ext(unquote(m.group(1)))}" if m else "")
     if _SECRET_HEADER.search(n):
         return f"{name}: {str_shape(value)}"
     return None
@@ -409,7 +476,7 @@ def _zip_line(body: bytes) -> str:
             names = [i.filename for i in zf.infolist() if not i.is_dir()]
     except zipfile.BadZipFile:
         return f"zip (damaged), {len(body)} bytes"
-    suffixes = Counter(PurePosixPath(n).suffix.lower() or "(no ext)" for n in names)
+    suffixes = Counter(_ext(n) or "(no ext)" for n in names)
     listing = ", ".join(f"{s} ×{c}" for s, c in sorted(suffixes.items()))
     return f"zip, {len(body)} bytes: {len(names)} entries ({listing})"
 
@@ -421,14 +488,16 @@ def _html_line(body: bytes) -> str:
         attrs = m.group(1)
         action = re.search(r"action\s*=\s*[\"']([^\"']*)", attrs, re.I)
         method = re.search(r"method\s*=\s*[\"']?(\w+)", attrs, re.I)
-        out.append(f"form {method.group(1).upper() if method else 'GET'} "
-                   f"{mask_url(action.group(1)) if action else '(this page)'}")
+        verb = method.group(1).upper() if method else "GET"
+        verb = verb if verb in ("GET", "POST", "DIALOG") else "?"
+        out.append(f"form {verb} {mask_url(action.group(1)) if action else '(this page)'}")
     inputs = []
     for m in re.finditer(r"<input\b([^>]*)>", text, re.I):
         name = re.search(r"name\s*=\s*[\"']([^\"']*)", m.group(1), re.I)
         kind = re.search(r"type\s*=\s*[\"']?(\w+)", m.group(1), re.I)
         if name:
-            inputs.append(f"{_key(name.group(1))}({kind.group(1).lower() if kind else 'text'})")
+            inputs.append(f"{_key(name.group(1))}"
+                          f"({_named(_ATTR_NAME, kind.group(1).lower()) if kind else 'text'})")
     if inputs:
         out.append("inputs: " + ", ".join(inputs[:_MAX_KEYS]))
     refresh = re.search(r"http-equiv\s*=\s*[\"']refresh[\"'][^>]*url=([^\"'>]+)", text, re.I)
@@ -561,7 +630,7 @@ class _Seen:
 
 def _request_url(start: str, headers: dict) -> tuple:
     parts = start.split()
-    method = parts[0] if parts else "?"
+    method = _named(_HTTP_METHOD, parts[0]) if parts else "?"
     target = parts[1] if len(parts) > 1 else ""
     if target.startswith("/"):
         host = (headers.get("host") or [""])[0]
@@ -585,8 +654,10 @@ def flow_entry(s: dict, seen: "_Seen" = None) -> list:
     lines += [f"       > {link}"
               for link in seen.links(_request_strings(start, req_pairs, req_headers, req_body))]
     status, resp_headers, resp_pairs, resp_body = split_http(s["response_raw"])
-    code = " ".join(status.split()[1:]) if status.upper().startswith("HTTP/") else status
-    lines.append(f"       < {code or '(no response)'}")
+    # The code only. The reason phrase is free text from the server, and a
+    # first line that is not a status line at all was printed whole.
+    m = re.match(r"HTTP/\d(?:\.\d)?\s+(\d{3})\b", status)
+    lines.append(f"       < {m.group(1) if m else '(no status line)' if status else '(no response)'}")
     for name, v in resp_pairs:
         line = header_line(name, v)
         if line:
@@ -611,7 +682,7 @@ def agent_entry(s: dict, seen: "_Seen" = None) -> str:
     # Never echo params of PIN-carrying methods from a capture.
     secret = method in _REDACTED_METHODS
     params = "[***]" if secret else shape(payload.get("params", []))
-    line = f"  [{s['num']:4}] {method}({params})"
+    line = f"  [{s['num']:4}] {_named(_RPC_METHOD, method)}({params})"
     links = []
     if seen is not None and not secret:
         links = [f"params{link}" for link in seen.links(_strings(payload.get("params", [])))]
@@ -621,7 +692,7 @@ def agent_entry(s: dict, seen: "_Seen" = None) -> str:
     elif isinstance(answer, dict) and "result" in answer:
         line += f" → {shape(answer['result'])}"
         if seen is not None:
-            seen.add(f"[{s['num']}] {method} result", _strings(answer["result"]))
+            seen.add(f"[{s['num']}] {_named(_RPC_METHOD, method)} result", _strings(answer["result"]))
     return line + "".join(f"\n         {link}" for link in links)
 
 
@@ -645,7 +716,8 @@ def analyze(saz_path: Path):
     print("\n=== Категорії ===")
     for cat, items in categories.items():
         print(f"  {cat}: {len(items)}")
-    other_hosts = Counter(s["host"].split(":")[0] for s in categories.get("other", []) if s["host"])
+    other_hosts = Counter(_named(_HOSTNAME, s["host"].split(":")[0])
+                          for s in categories.get("other", []) if s["host"])
     if other_hosts:
         print("Інші хости: " + ", ".join(f"{h} ×{c}" for h, c in other_hosts.most_common(15)))
 
@@ -666,7 +738,7 @@ def analyze(saz_path: Path):
         for s in sedo:
             m = re.match(r'(\w+)\s+(\S+)', s["method_url"])
             if m and m.group(1) != "CONNECT" and not _is_static(s):
-                urls.add(f"{m.group(1)} {mask_url(m.group(2))}")
+                urls.add(f"{_named(_HTTP_METHOD, m.group(1))} {mask_url(m.group(2))}")
         for u in sorted(urls):
             print(f"  {u}")
 
@@ -677,7 +749,7 @@ def analyze(saz_path: Path):
         print("Це означає СЕДО використовує OIDC flow!")
         for s in oidc[:5]:
             parts = s["method_url"].split()
-            print(f"  [{s['num']:4}] {parts[0] if parts else '?'} "
+            print(f"  [{s['num']:4}] {_named(_HTTP_METHOD, parts[0]) if parts else '?'} "
                   f"{mask_url(parts[1]) if len(parts) > 1 else ''}")
 
     # ─── The flow, request by request ────────────────────────

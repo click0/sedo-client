@@ -197,6 +197,27 @@
             label: "{{ item.key }}"
           no_log: true
 
+        # A PIN without quotes in vault.yml is retyped by YAML: 0123 becomes the
+        # number 83 (octal), 001234 becomes 668, 12_34 becomes 1234, an empty
+        # value becomes None. The client would get another PIN, and each failed
+        # login costs one of the token's attempts, every morning. So a value
+        # that is not a string stops the worker before the client starts. The
+        # message names the variables, never the values, so no no_log here (it
+        # would hide the reason from the report).
+        - name: Check that the PINs in vault.yml are quoted
+          vars:
+            sedo_pins: >-
+              {{ {'SEDO_PIN': virtual_pins[inventory_hostname]} | combine(sedo_pin_env | default({})) }}
+            pins_not_text: >-
+              {{ sedo_pins | dict2items | rejectattr('value', 'string') | map(attribute='key') | list }}
+          ansible.builtin.assert:
+            that: pins_not_text | length == 0
+            quiet: true
+            fail_msg: >-
+              PIN not quoted in vault.yml: {{ pins_not_text | join(', ') }}. YAML reads 0123 as the
+              number 83, so the token would get a different PIN. Write the PIN in quotes ("0123").
+              The client was not started, no PIN attempt was spent.
+
         # Windows-форми шляхів: аргументи читає Windows-Python усередині префіксу.
         # argv, not cmd: a cmd string is split by shlex, which ate the
         # backslashes of 'wine C:\Python312\python.exe'. PINs only on stdin
