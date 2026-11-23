@@ -302,3 +302,114 @@ def test_malformed_urls_do_not_stop_the_report(tmp_path, fa, capsys):
     fa.analyze(saz)
     out = capsys.readouterr().out
     assert "invalid-url(" in out and "SECRET" not in out
+
+
+# ─── Values in places that normally hold a NAME (found by fuzzing, 0.37) ───
+# The generated captures carried a marked value in every position a real one
+# can have. These are the positions where the marker reached the report.
+
+def _one_session(tmp_path, request: bytes, response: bytes) -> Path:
+    saz = tmp_path / "one.saz"
+    with zipfile.ZipFile(saz, "w") as zf:
+        zf.writestr("raw/1_c.txt", request)
+        zf.writestr("raw/1_s.txt", response)
+    return saz
+
+
+class TestValuesWithoutAName:
+    def test_authorization_without_a_scheme(self, fa):
+        # Some APIs send the bare token; its first word was printed as the scheme.
+        assert fa.header_line("Authorization", "SECRET~token~0a1b2c") == "Authorization: str(19)"
+        assert fa.header_line("Authorization", "Bearer\tSECRET~token~0a1b2c") == "Authorization: Bearer str(19)"
+        assert fa.header_line("Authorization", "Bearer SECRET~token~0a1b2c") == "Authorization: Bearer str(19)"
+        assert "SECRET" not in fa.header_line("Authorization", 'Digest username="SECRET", response="SECRET"')
+
+    def test_a_bare_word_in_a_query_or_fragment(self, fa):
+        assert fa.mask_query("SECRETticket") == "str(12)"
+        assert fa.mask_query("page=2&SECRETticket&state=SECRETstate") == "page=2&str(12)&state=str(11)"
+        assert fa.mask_url("https://sedo.mod.gov.ua/cb#SECRETaccesstoken") == "https://sedo.mod.gov.ua/cb#str(17)"
+        # An SPA route keeps its structure.
+        assert fa.mask_url("https://sedo.mod.gov.ua/#/inbox/9876543") == "https://sedo.mod.gov.ua/#path(/inbox/{id})"
+
+    @pytest.mark.parametrize("value", ["²", "٣", "9" * 5000])
+    def test_digits_that_int_does_not_take(self, fa, value):
+        assert "=" in fa.mask_query(f"x={value}")              # "²".isdigit() is true; int("²") raises
+
+    def test_a_cookie_without_a_name(self, fa):
+        assert fa.header_line("Cookie", "lang=uk; SECRETvalue") == "Cookie: lang, (no name)"
+        assert fa.header_line("Set-Cookie", "SECRETvalue; Path=/; HttpOnly") == "Set-Cookie: (no name) (Path=/; HttpOnly)"
+        assert "SECRET" not in fa.header_line("Set-Cookie", "S=1; SECRET0attr; Domain=SECRET host; SameSite=SECRET 1")
+
+    def test_the_status_line_gives_only_the_code(self, tmp_path, fa, capsys):
+        req = _http("GET https://sedo.mod.gov.ua/api/x HTTP/1.1", [("Host", "sedo.mod.gov.ua")])
+        fa.analyze(_one_session(tmp_path, req, b"HTTP/1.1 400 SECRET reason phrase\r\n\r\n"))
+        out = capsys.readouterr().out
+        assert "       < 400\n" in out and "SECRET" not in out
+        fa.analyze(_one_session(tmp_path, req, b'{"token": "SECRET"} this is not HTTP at all\r\n\r\n'))
+        out = capsys.readouterr().out
+        assert "(no status line)" in out and "SECRET" not in out
+
+    def test_a_body_line_is_never_taken_for_a_header(self, tmp_path, fa, capsys):
+        # LF-only headers, then a chunked body with CRLF: the first CRLFCRLF is at
+        # the END of the body, so the body used to be parsed as headers — and a
+        # "header" whose name contains "session" is printed with its name.
+        body = _chunked(json.dumps({"name": "SECRETname", "session_id": "SECRETsid"}).encode())
+        resp = b"HTTP/1.1 200 OK\nContent-Type: application/json\nTransfer-Encoding: chunked\n\n" + body
+        req = _http("GET https://sedo.mod.gov.ua/api/x HTTP/1.1", [("Host", "sedo.mod.gov.ua")])
+        fa.analyze(_one_session(tmp_path, req, resp))
+        out = capsys.readouterr().out
+        assert "SECRET" not in out and "JSON {name: str(10), session_id: str(9)}" in out
+        start, headers, pairs, _ = fa.split_http(b'GET / HTTP/1.1\r\nHost: h\r\n "x", "session_id": 1\r\n\r\n')
+        assert [n for n, _ in pairs] == ["Host"] and list(headers) == ["host"]
+
+    def test_method_names_must_look_like_names(self, tmp_path, fa, capsys):
+        call = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "SECRET text, not a method", "params": []})
+        req = _http("POST /json-rpc HTTP/1.1", [("Host", "127.0.0.1:8081")], call.encode())
+        fa.analyze(_one_session(tmp_path, req, b'HTTP/1.1 200 OK\r\n\r\n{"result": null}'))
+        assert "SECRET" not in capsys.readouterr().out
+        req = _http("SECRETverb https://sedo.mod.gov.ua/x HTTP/1.1", [("Host", "sedo.mod.gov.ua")])
+        fa.analyze(_one_session(tmp_path, req, b"HTTP/1.1 200 OK\r\n\r\n"))
+        assert "SECRET" not in capsys.readouterr().out
+
+
+class TestShownKeysAndNames:
+    @pytest.mark.parametrize("key, value", [
+        ("error", "Користувача Петренка не знайдено"), ("status", "Підписано Петренком"),
+        ("error", "user petrenko is locked"), ("type", "Наказ"), ("scope", "Петренко Іван"),
+    ])
+    def test_a_sentence_under_a_technical_key_is_a_value(self, fa, key, value):
+        assert fa.str_shape(value, key) == f"str({len(value)})"
+
+    @pytest.mark.parametrize("key, value", [
+        ("error", "invalid_grant"), ("alg", "RS256"), ("token_type", "Bearer"),
+        ("content_type", "application/pkcs7-signature"), ("scope", "openid profile email"),
+        ("status", "new"), ("version", "1.3.1"),
+    ])
+    def test_a_technical_word_is_still_shown(self, fa, key, value):
+        assert fa.str_shape(value, key) == json.dumps(value)
+
+    def test_names_that_are_really_values(self, fa):
+        # A CSRF token used as the field NAME, an object keyed by hashes or addresses.
+        assert fa._key("5f4dcc3b5aa765d61d8327deb882cf99") == "<id>"
+        assert fa._key("petrenko@mil.gov.ua") == "<id>"
+        assert fa._key("session_id") == "session_id"
+
+    @pytest.mark.parametrize("name, shown", [
+        ("Наказ.pdf", ".pdf"), ("a.PDF.p7s", ".p7s"), ("archive.7z", ".7z"), ("README", ""),
+        ("Петренко І.В", "(other)"), ("звіт 01.2026", "(other)"), ("x.SECRET0123456789", "(other)"),
+    ])
+    def test_an_extension_must_look_like_one(self, fa, name, shown):
+        assert fa._ext(name) == shown
+
+    def test_zip_and_content_disposition_use_it(self, fa):
+        buf = _io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("Петренко І.В", b"x")
+            zf.writestr("Наказ.pdf", b"x")
+        assert fa._zip_line(buf.getvalue()).endswith("2 entries ((other) ×1, .pdf ×1)")
+        line = fa.header_line("Content-Disposition", "attachment; filename*=UTF-8''%D0%86.%D0%92")
+        assert line == "Content-Disposition: attachment; filename=*(other)"
+
+    def test_html_form_method_is_one_of_three(self, fa):
+        line = fa._html_line(b"<form method=SECRETword action='/a'><input name=q type=SECRET0></form>")
+        assert "SECRET" not in line and "form ? /a" in line

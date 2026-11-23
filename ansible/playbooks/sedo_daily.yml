@@ -137,6 +137,27 @@
             label: "{{ item.key }}"
           no_log: true
 
+        # PIN без лапок у vault.yml YAML читає по-своєму: 0123 стає числом 83
+        # (вісімкове), 001234 — 668, 12_34 — 1234, порожнє значення — None.
+        # Клієнт отримав би інший PIN, а кожен невдалий вхід на Алмаз-1К коштує
+        # однієї з 15 спроб, і так щоранку. Тому значення, що не є рядком,
+        # зупиняє воркера ще до запуску клієнта. У повідомленні лише назви
+        # змінних, не значення, тому no_log тут не потрібен (і сховав би
+        # причину від звіту).
+        - name: Перевірити, що PIN-и у vault.yml записані в лапках
+          vars:
+            sedo_pins: >-
+              {{ {'SEDO_PIN': almaz_pins[inventory_hostname]} | combine(sedo_pin_env | default({})) }}
+            pins_not_text: >-
+              {{ sedo_pins | dict2items | rejectattr('value', 'string') | map(attribute='key') | list }}
+          ansible.builtin.assert:
+            that: pins_not_text | length == 0
+            quiet: true
+            fail_msg: >-
+              PIN не в лапках у vault.yml: {{ pins_not_text | join(', ') }}. YAML читає 0123 як число 83,
+              тож на токен пішов би інший PIN. Запишіть PIN у лапках ("0123"). Клієнт не запускався,
+              спроб PIN не витрачено.
+
         - name: Запуск клієнта з PKCS#11 backend
           ansible.windows.win_command:
             cmd: >

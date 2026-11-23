@@ -156,3 +156,53 @@ class TestPinExec:
         got, _ = self._run("SEDO_PIN=PIN-SECRET-4711\n", "--fetch")
         assert "PIN-SECRET-4711" not in json.dumps(got["argv"])
         assert "PIN-SECRET-4711" not in _folded(_text(), "pin_exec")
+
+
+WINDOWS = PLAYBOOKS / "sedo_daily.yml"
+GUARD = {LINUX: ("- name: Check that the PINs in vault.yml are quoted",
+                 "- name: Run sedo-client with virtual backend", "virtual_pins"),
+         WINDOWS: ("- name: Перевірити, що PIN-и у vault.yml записані в лапках",
+                   "- name: Запуск клієнта з PKCS#11 backend", "almaz_pins")}
+
+
+@pytest.mark.parametrize("path", [LINUX, WINDOWS], ids=lambda p: p.name)
+class TestQuotedPins:
+    """
+    YAML retypes a PIN written without quotes: 0123 is the number 83 (octal),
+    001234 is 668, 12_34 is 1234, an empty value is None — and "None" went to
+    the token. Each wrong PIN costs one of the 15 attempts of an Almaz-1K, on
+    every daily run, so both playbooks stop the worker before the client starts
+    (checked with ansible-core 2.18 and 2.21: the report names the task).
+    """
+
+    def _guard_and_run(self, path):
+        guard_name, run_name, _ = GUARD[path]
+        tasks = _tasks(_text(path))
+        names = [name for name, _ in tasks]
+        assert guard_name in names and run_name in names
+        return tasks[names.index(guard_name)][1], tasks[names.index(run_name)][1], names
+
+    def test_checked_before_the_client_starts_and_inside_the_block(self, path):
+        guard, run, names = self._guard_and_run(path)
+        guard_name, run_name, _ = GUARD[path]
+        assert names.index(guard_name) < names.index(run_name)
+        # Same indentation as the run task: inside the block whose rescue feeds the report.
+        indent = lambda body: len(body) - len(body.lstrip(" "))          # noqa: E731
+        text = _text(path)
+        assert indent(text[text.index(guard_name) - 8:]) == indent(text[text.index(run_name) - 8:]) == 8
+
+    def test_every_pin_the_client_gets_must_be_a_string(self, path):
+        guard, run, _ = self._guard_and_run(path)
+        pins = GUARD[path][2]
+        combined = f"{{'SEDO_PIN': {pins}[inventory_hostname]}} | combine(sedo_pin_env | default({{}}))"
+        assert combined in guard and combined in run         # the same PINs the run task uses
+        assert "rejectattr('value', 'string')" in guard
+        assert "that: pins_not_text | length == 0" in guard
+
+    def test_the_message_names_variables_and_no_no_log_hides_it(self, path):
+        guard, _, _ = self._guard_and_run(path)
+        fail_msg = _subblock(guard, "fail_msg")
+        assert "pins_not_text | join" in fail_msg
+        assert not re.search(r"sedo_pins|\.value|values\(\)", fail_msg)       # names only
+        # no_log would replace the reason in the Telegram report with "output has been hidden".
+        assert not re.search(r"^\s+no_log:", guard, re.M)

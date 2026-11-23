@@ -3,6 +3,11 @@
 # Decrypt:  ansible-vault decrypt vault.yml
 # Use:      ansible-playbook ... --ask-vault-pass
 
+# Every PIN goes IN QUOTES. YAML retypes a bare one: 0123 is the number 83
+# (octal), 001234 is 668, 12_34 is 1234 — the token would get a different PIN,
+# and each failed login costs one of its attempts. The playbooks stop a worker
+# whose PIN is not a quoted string before the client starts.
+
 # PINs for Windows workers with hardware Almaz-1K tokens
 almaz_pins:
   ws01: "ENTER_PIN_HERE"

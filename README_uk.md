@@ -155,7 +155,8 @@ Remove-Item Env:SEDO_PIN
 ```bash
 cd ansible
 ansible-vault create inventory/vault.yml
-# (формат — див. vault.yml.example)
+# (формат — див. vault.yml.example; PIN-и обов'язково в лапках:
+#  без них YAML читає 0123 як число 83, і плейбук зупинить воркера)
 
 ansible-playbook -i inventory/hosts.yml playbooks/sedo_daily.yml --ask-vault-pass
 
@@ -269,7 +270,11 @@ sedo-client/
 звичайна робота з одним ключем: без локального файлу нічого не змінюється. Два
 профілі на одному токені (два CKA_ID) ділять сесію; два токени — дві сесії і два
 PIN. PIN не зберігається: профіль читає `SEDO_PIN_<ІМ'Я>` (ключ `auth` приймає й
-звичайний `SEDO_PIN`), `pin_file`, або запитує інтерактивно. `--sign-file FILE`
+звичайний `SEDO_PIN`), `pin_file`, або запитує інтерактивно. `pin_file` — один
+рядок у UTF-8 (BOM і UTF-16 з BOM, як пише PowerShell 5, читаються; другий рядок
+чи невидимий символ — помилка, а не PIN). Якщо у двох профілів типова змінна
+збігається (імена кирилицею дають `SEDO_PIN__`), клієнт зупиняється і просить
+задати `pin_env`. `--sign-file FILE`
 підписує файл профілем `sign`, не торкаючись СЕДО — так сьогодні перевіряється
 ключ для документів, бо endpoint-и підпису в самому СЕДО ще потребують Fiddler.
 

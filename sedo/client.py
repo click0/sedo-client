@@ -25,7 +25,9 @@ log = logging.getLogger(__name__)
 
 # Server-supplied document ids are used as a path segment and a filename —
 # restrict to a safe charset so ".." / "/" / drive-letters can't escape output_dir.
-_DOC_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
+# Used with fullmatch: "^…$" also matches before a trailing newline, so "a\n"
+# passed and became the file name "a\n.zip".
+_DOC_ID_RE = re.compile(r"[A-Za-z0-9._-]{1,128}")
 
 # Windows device names. "downloads\\NUL.zip" is the NUL device, not a file —
 # the extension does not help — so a document with id "NUL" or "CON" was
@@ -40,7 +42,7 @@ _WINDOWS_RESERVED = frozenset(
 
 def _safe_doc_id(doc_id) -> str:
     """Validate a document id from SEDO JSON before using it in a path/URL."""
-    if not isinstance(doc_id, str) or not _DOC_ID_RE.match(doc_id) or ".." in doc_id:
+    if not isinstance(doc_id, str) or not _DOC_ID_RE.fullmatch(doc_id) or ".." in doc_id:
         raise ValueError(f"Unsafe document id: {doc_id!r}")
     stem = doc_id.split(".", 1)[0].upper()
     if stem in _WINDOWS_RESERVED or doc_id.endswith("."):
@@ -547,7 +549,12 @@ class SEDOClient:
         for page in range(1, INBOX_MAX_PAGES + 1):
             r = self.session.get(url, params=params, timeout=30)
             r.raise_for_status()
-            data = r.json()
+            try:
+                data = r.json()
+            except RecursionError:
+                # Python 3.11's decoder on JSON nested thousands deep; the
+                # message it carries says nothing about the inbox.
+                raise ValueError("Unexpected inbox response: JSON nested too deep") from None
             if not isinstance(data, dict):
                 raise ValueError(f"Unexpected inbox response: {type(data).__name__}, "
                                  "expected an object with 'documents'")
@@ -580,15 +587,33 @@ class SEDOClient:
                          "refusing to page further")
 
     def _inbox_next_url(self, current: str, nxt: str) -> str:
-        """Absolute URL of ``next``; only on the SEDO origin itself."""
+        """
+        Absolute URL of ``next``; only on the SEDO origin itself.
+
+        The origin is checked twice: on the link as urllib reads it, and on the
+        URL requests will actually send. The two parse differently:
+        for ``https://other.example\\@sedo.mod.gov.ua/`` urlsplit takes the
+        host after "@" (the SEDO one), requests the one before the backslash —
+        the check passed and the next page was fetched from another host. A link
+        with credentials in it (``user@host``) is refused as well: requests
+        would turn them into an Authorization header.
+        """
         target = urljoin(current, nxt)
-        if _origin(target) != _origin(self.sedo_url):
-            t, o = urlsplit(target), urlsplit(self.sedo_url)
+        home = _origin(self.sedo_url)
+        sent = requests.Request("GET", target).prepare().url    # InvalidURL: a RequestException
+        t = urlsplit(sent)
+        if _origin(target) != home or _origin(sent) != home or "@" in t.netloc:
+            o = urlsplit(self.sedo_url)
             raise ValueError(f"Inbox 'next' leaves {o.scheme}://{o.netloc}: "
                              f"{t.scheme}://{t.netloc}; not following it")
         return target
 
-    def download_document(self, doc_id: str, output_dir: Path) -> Path:
+    def download_document(self, doc_id, output_dir: Path) -> Path:
+        # A JSON API sends ids as numbers as often as strings (fetch_inbox
+        # already de-duplicates both). Decimal digits are a safe file name;
+        # refusing them stopped the whole run at the first document.
+        if isinstance(doc_id, int) and not isinstance(doc_id, bool) and doc_id >= 0:
+            doc_id = str(doc_id)
         doc_id = _safe_doc_id(doc_id)
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -649,11 +674,19 @@ class IITAgentAdapter:
         devices = self._c.enum_key_media_devices()
         if not devices:
             raise RuntimeError("No devices")
+        # An object or a number here used to end in KeyError(0) / TypeError,
+        # which main() printed as "❌ 0". Checked BEFORE the PIN is sent.
+        if not isinstance(devices, list):
+            raise RuntimeError("Unexpected EnumKeyMediaDevices result: "
+                               f"{type(devices).__name__}, expected a list")
         self._device = devices[0]
         self._c.read_private_key(self._device, pin)
         certs = self._c.enum_own_certificates()
         if not certs:
             raise RuntimeError("No certificates bound to private key")
+        if not isinstance(certs, list):
+            raise RuntimeError("Unexpected EnumOwnCertificates result: "
+                               f"{type(certs).__name__}, expected a list")
         if self._cert_index >= len(certs):
             raise RuntimeError(f"cert_index {self._cert_index} out of range: the key "
                                f"has {len(certs)} certificate(s)")
@@ -678,6 +711,10 @@ class IITAgentAdapter:
         """DER may arrive as hex or base64 — try hex first, then strict base64."""
         if not isinstance(value, str):
             raise RuntimeError(f"Certificate field is not a string: {type(value).__name__}")
+        # "" and " " are valid hex for zero bytes: login() "succeeded" and
+        # authorize() went on to send a certificate of 0 bytes.
+        if not value.strip():
+            raise RuntimeError("Certificate field is empty")
         try:
             return bytes.fromhex(value)
         except ValueError:
@@ -752,6 +789,19 @@ def _build_parser():
     return parser
 
 
+def _pin_or_exit(profile, argv_pin, allow_generic_env: bool) -> str:
+    """
+    resolve_profile_pin, with a bad ``pin_file`` reported like any other
+    config error (exit 2). It raised ConfigError outside every ``try``: a
+    missing or unreadable PIN file ended in a traceback.
+    """
+    try:
+        return resolve_profile_pin(profile, argv_pin, allow_generic_env=allow_generic_env)
+    except ConfigError as e:
+        log.error("❌ config: %s", e)
+        sys.exit(2)
+
+
 def main():
     force_utf8_io()
 
@@ -789,7 +839,7 @@ def main():
     if args.sign_file:
         # The document key alone: no SEDO, no auth login. The generic SEDO_PIN
         # is the login key's PIN — it reaches this key only when it IS that key.
-        pin = resolve_profile_pin(sign_profile, args.pin, allow_generic_env=same_key)
+        pin = _pin_or_exit(sign_profile, args.pin, allow_generic_env=same_key)
         try:
             with SEDOClient(sedo_url=url, config=config, roles=("sign",)) as sedo:
                 sedo.login("sign", pin)
@@ -807,7 +857,7 @@ def main():
 
     # PIN precedence: --pin (argv, least safe) → $SEDO_PIN_<PROFILE> → SEDO_PIN
     # → pin_file → prompt. An empty PIN exits here instead of costing an attempt.
-    args.pin = resolve_profile_pin(auth_profile, args.pin, allow_generic_env=True)
+    args.pin = _pin_or_exit(auth_profile, args.pin, allow_generic_env=True)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     try:

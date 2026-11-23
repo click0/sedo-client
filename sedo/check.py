@@ -65,7 +65,9 @@ def pe_bitness(path) -> Optional[int]:
             pe = fh.read(6)
     except OSError:
         return None
-    if pe[:4] != b"PE\0\0":
+    # len: a file cut right after the signature gave struct.error, which is
+    # not OSError — the whole profile check ended in "перевірка профілю впала".
+    if len(pe) < 6 or pe[:4] != b"PE\0\0":
         return None
     machine = struct.unpack_from("<H", pe, 4)[0]
     return {0x014C: 32, 0x8664: 64, 0xAA64: 64, 0x01C4: 32}.get(machine)
@@ -107,8 +109,17 @@ def _pin_source(profile, is_auth_key: bool) -> tuple:
     if is_auth_key and os.environ.get(PIN_ENV):
         return OK, f"PIN: ${PIN_ENV} задано (${var} — ні)"
     if profile.pin_file:
+        from .config import ConfigError, _read_pin_file
         p = Path(profile.pin_file).expanduser()
-        return (OK, f"PIN: файл {p}") if p.is_file() else (FAIL, f"PIN: файл {p} не існує")
+        if not p.is_file():
+            return FAIL, f"PIN: файл {p} не існує"
+        # The same reader the login uses: a second line, a NUL or an invisible
+        # character is found here, without a token, instead of on the first run.
+        try:
+            empty = not _read_pin_file(p)
+        except (ConfigError, OSError) as e:
+            return FAIL, f"PIN: {e}"
+        return (WARN, f"PIN: файл {p} порожній — буде інтерактивний запит") if empty else (OK, f"PIN: файл {p}")
     return WARN, f"PIN: ні ${var}" + (f", ні ${PIN_ENV}" if is_auth_key else "") + " — буде інтерактивний запит"
 
 

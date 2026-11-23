@@ -29,6 +29,7 @@ PIN у файлах не зберігається: профіль лише ка�
 ``pin`` у файлі приймається лише з config_local.toml і з попередженням.
 """
 
+import codecs
 import copy
 import dataclasses
 import logging
@@ -37,6 +38,7 @@ import re
 import stat
 import sys
 import tomllib
+import unicodedata
 from pathlib import Path
 from typing import Optional
 
@@ -68,8 +70,10 @@ _SEDO_KEYS = {"url", "output", "since"}
 _PROFILE_KEYS = {"backend", "module", "slot", "cert_id", "cert_index", "key_file",
                  "mechanism", "pin_env", "pin_file", "pin"}
 _TOP_KEYS = {"sedo", "keys", "roles"}
-_HEX_ID_RE = re.compile(r"^(?:[0-9A-Fa-f]{2})+$")
-_MECH_RE = re.compile(r"^0x[0-9A-Fa-f]{1,8}$")
+# Both used with fullmatch: "$" also matches before a trailing newline, so
+# cert_id = "01\n" passed and went to pkcs11-tool as --id.
+_HEX_ID_RE = re.compile(r"(?:[0-9A-Fa-f]{2})+")
+_MECH_RE = re.compile(r"0x[0-9A-Fa-f]{1,8}")
 
 
 class ConfigError(ValueError):
@@ -169,11 +173,24 @@ def default_config_dir(env: Optional[dict] = None) -> Path:
 
 def _read_toml(path: Path) -> dict:
     try:
-        with open(path, "rb") as fh:
-            return tomllib.load(fh)
-    except tomllib.TOMLDecodeError as e:
-        raise ConfigError(f"{path}: {e}") from e
+        raw = path.read_bytes()
     except OSError as e:
+        raise ConfigError(f"{path}: {e}") from e
+    try:
+        # utf-8-sig: Notepad and PowerShell 5 (-Encoding UTF8) put a BOM first,
+        # and tomllib answered "Invalid statement (at line 1, column 1)" for a
+        # file that looks perfectly fine in the editor.
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError as e:
+        # UTF-16 (PowerShell 5 ">" / Out-File) or an ANSI code page with a
+        # Cyrillic path in it. tomllib.load raised UnicodeDecodeError, which is
+        # neither TOMLDecodeError nor OSError: main() showed a traceback.
+        kind = "UTF-16" if raw[:2] in (codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE) else "not UTF-8"
+        raise ConfigError(f"{path}: the file is {kind} (byte {e.start}); "
+                          "save it as UTF-8") from e
+    try:
+        return tomllib.loads(text)
+    except tomllib.TOMLDecodeError as e:
         raise ConfigError(f"{path}: {e}") from e
 
 
@@ -217,6 +234,12 @@ def _validate_raw(data: dict, source: str, is_local: bool) -> None:
     if not isinstance(roles, dict):
         raise ConfigError(f"{source}: [roles] must be a table")
     _check_keys("roles", roles, set(ROLES), source)
+    for role, target in roles.items():
+        # auth = ["login"] or auth = {…}: unhashable, and _build() looked it
+        # up in a dict — TypeError, a traceback instead of this message.
+        if not isinstance(target, str):
+            raise ConfigError(f"{source}: [roles].{role} must be the name of a "
+                              f"[keys.<name>] profile, in quotes")
 
 
 def _build(merged: dict, sources: list, roles_from_local: bool = False) -> Config:
@@ -246,11 +269,11 @@ def _build(merged: dict, sources: list, roles_from_local: bool = False) -> Confi
             raise ConfigError(f"{where}.cert_index must be a non-negative integer")
         if p.cert_id is not None:
             p.cert_id = str(p.cert_id).lower()
-            if not _HEX_ID_RE.match(p.cert_id):
+            if not _HEX_ID_RE.fullmatch(p.cert_id):
                 raise ConfigError(f"{where}.cert_id must be hex bytes like \"01\" or \"0a2b\"")
         if p.mechanism is not None:
             p.mechanism = str(p.mechanism)
-            if not _MECH_RE.match(p.mechanism):
+            if not _MECH_RE.fullmatch(p.mechanism):
                 raise ConfigError(f"{where}.mechanism must look like \"0x80420031\"")
         for field in ("module", "key_file", "pin_env", "pin_file", "pin"):
             value = getattr(p, field)
@@ -286,7 +309,30 @@ def _build(merged: dict, sources: list, roles_from_local: bool = False) -> Confi
         raise ConfigError("[roles] is required when several [keys.*] profiles are defined")
     if "default" in cfg.keys and "default" not in cfg.roles.values():
         del cfg.keys["default"]          # placeholder, nothing uses it
+    _check_pin_env_collisions(cfg)
     return cfg
+
+
+def _check_pin_env_collisions(cfg: Config) -> None:
+    """
+    Two profiles must not read their PIN from one variable.
+
+    The default name keeps only A-Z and 0-9 of the profile name, so "вхід" and
+    "підпис" both give SEDO_PIN__, "key-1" and "key.1" both SEDO_PIN_KEY_1.
+    One variable holds one value: one of the two tokens would be sent the
+    other's PIN, a failed login on every run. Profiles with an explicit
+    ``pin_env`` (sharing may be meant) or a ``pin`` in the file are not checked.
+    """
+    by_env: dict = {}
+    for p in cfg.distinct_profiles():
+        if p.pin_env is None and not p.pin:
+            by_env.setdefault(p.default_pin_env, []).append(p.name)
+    for env, names in by_env.items():
+        if len(names) > 1:
+            raise ConfigError(
+                f"profiles {', '.join(names)} would all read their PIN from ${env} "
+                "(the default name keeps only A-Z and 0-9 of the profile name): "
+                "set pin_env in one of them")
 
 
 def load_config(client_dir: Optional[Path] = None, local_path: Optional[str] = None,
@@ -334,6 +380,40 @@ def load_config(client_dir: Optional[Path] = None, local_path: Optional[str] = N
     return cfg
 
 
+def _read_pin_file(path: Path) -> str:
+    """
+    The PIN from a one-line file — exactly what was typed, or ConfigError.
+
+    What reaches C_Login must not be a guess: every wrong PIN costs one of the
+    15 attempts of an Almaz-1K, and an unattended run repeats it daily. Windows
+    tools add what nobody sees in the editor:
+
+    - a UTF-8 BOM (Notepad, PowerShell 5 ``Set-Content -Encoding UTF8``) became
+      the first character of the PIN — a wrong PIN on every run;
+    - UTF-16 (PowerShell 5 ``>`` / ``Out-File``) was a UnicodeDecodeError
+      traceback; with a BOM it is unambiguous and is simply read;
+    - a second line, a NUL or a zero-width character stayed inside the PIN.
+
+    The messages never quote the content.
+    """
+    raw = path.read_bytes()
+    utf16 = raw[:2] in (codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)
+    value = None
+    try:
+        value = raw.decode("utf-16" if utf16 else "utf-8-sig").strip()
+    except UnicodeDecodeError:
+        pass          # raised below: the exception holds the file's bytes in .object
+    if value is None:
+        raise ConfigError(f"{path} is not UTF-8 text; save the PIN as one line of UTF-8")
+    if len(value.splitlines()) > 1:
+        raise ConfigError(f"{path} has more than one line; it must hold the PIN and nothing else")
+    if any(unicodedata.category(ch).startswith("C") for ch in value):
+        raise ConfigError(f"{path} has control or invisible characters in the PIN "
+                          "(UTF-16 without a BOM? a zero-width character?); "
+                          "save the PIN as one line of UTF-8")
+    return value
+
+
 def resolve_profile_pin(profile: KeyProfile, argv_pin: Optional[str] = None,
                         allow_generic_env: bool = True, env: Optional[dict] = None) -> str:
     """
@@ -364,9 +444,11 @@ def resolve_profile_pin(profile: KeyProfile, argv_pin: Optional[str] = None,
             mode = path.stat().st_mode
             if os.name != "nt" and mode & (stat.S_IRGRP | stat.S_IROTH):
                 log.warning("%s is readable by other users (mode %o)", path, stat.S_IMODE(mode))
-            value = path.read_text(encoding="utf-8").strip()
+            value = _read_pin_file(path)
         except OSError as e:
             raise ConfigError(f"[keys.{profile.name}].pin_file: {e}") from e
+        except ConfigError as e:
+            raise ConfigError(f"[keys.{profile.name}].pin_file: {e}") from None
         if value:
             return value
         log.warning("%s is empty; asking interactively", path)
