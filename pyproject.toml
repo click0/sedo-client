@@ -23,6 +23,9 @@ pkcs11 = ["PyKCS11>=1.5.15"]
 test = ["pytest>=7.4"]
 # Cross-check engine for scripts/iit_inventory.py (the script itself is stdlib-only).
 analysis = ["pefile>=2024.8.26"]
+# For fuzz/ (python fuzz/run.py). Not part of the test suite and not in "all":
+# the harnesses are run by hand, before a release.
+fuzz = ["hypothesis>=6.100"]
 all = ["PyKCS11>=1.5.15", "pytest>=7.4", "pefile>=2024.8.26"]
 
 [project.scripts]
