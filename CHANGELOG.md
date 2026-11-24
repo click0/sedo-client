@@ -7,7 +7,7 @@ Contact:  github.com/click0
 License:  BSD 3-Clause "New" or "Revised" License
 ```
 
-## v0.37 — unreleased
+## v0.37 — 2026-11-24
 
 ### Головне
 
