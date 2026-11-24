@@ -41,6 +41,39 @@ def _client():
     return client
 
 
+# ─── the harnesses themselves ───────────────────────────────
+
+FUZZ = Path(__file__).resolve().parent.parent / "fuzz"
+
+
+class TestFuzzDirectory:
+    """fuzz/ is run by hand, not in CI: at least keep the files, the runner and the README in step."""
+
+    HARNESSES = sorted(p.stem[3:] for p in FUZZ.glob("fz_*.py"))
+
+    def test_every_harness_compiles(self):
+        assert self.HARNESSES
+        for path in sorted(FUZZ.glob("*.py")):
+            compile(path.read_text(encoding="utf-8"), str(path), "exec")
+
+    def test_the_runner_and_the_readme_list_them_all(self):
+        import ast
+        tree = ast.parse((FUZZ / "run.py").read_text(encoding="utf-8"))
+        listed = next(ast.literal_eval(node.value) for node in ast.walk(tree)
+                      if isinstance(node, ast.Assign) and node.targets[0].id == "HARNESSES")
+        assert sorted(listed) == self.HARNESSES
+        readme = (FUZZ / "README.md").read_text(encoding="utf-8")
+        assert all(f"`fz_{name}.py`" in readme for name in self.HARNESSES)
+
+    def test_nothing_is_written_next_to_the_harnesses(self):
+        # Reproducers go to $FUZZ_OUT / a temp dir (common.save); a PE or a .saz
+        # left in the tree could end up in a commit.
+        for path in sorted(FUZZ.glob("fz_*.py")):
+            text = path.read_text(encoding="utf-8")
+            assert "dirname(__file__)" not in text.replace("sys.path.insert(0, os.path.dirname(", ""), path.name
+            assert "tempfile.tempdir" not in text, path.name          # common.py owns the private temp dir
+
+
 # ─── sedo/client.py ─────────────────────────────────────────
 
 class TestDocumentIds:

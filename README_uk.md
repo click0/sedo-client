@@ -205,6 +205,10 @@ sedo-client/
 │   ├── iit_unpack.sh           — розпаковує інсталятор IIT без запуску
 │   ├── iit_inventory.py        — інвентар / diff / реєстр DLL (stdlib PE-парсер)
 │   └── check_version.py        — гейт версії для CI і release.yml
+├── fuzz/                       — фазери для коду, що розбирає чужі дані
+│   ├── run.py                  — запуск усіх або вибраних (python fuzz/run.py)
+│   ├── fz_*.py                 — по одному на джерело даних; див. fuzz/README.md
+│   └── README.md               — що перевіряється і що робити зі знахідкою
 ├── ansible/
 │   ├── inventory/
 │   │   ├── hosts.yml
@@ -308,6 +312,15 @@ python sedo_client.py --backend pkcs11 --fetch     # модуль знайдет
 pip install ".[test,analysis]"   # pytest + pefile (cross-check інвентаря)
 python -m pytest tests/ -v
 python scripts/check_version.py  # заголовки Version: збігаються з pyproject
+```
+
+Фазери запускаються окремо, руками (у CI їх немає): вони подають згенеровані
+дані на код, що розбирає відповіді СЕДО й агента, вивід `pkcs11-tool`,
+конфіг, PIN-файли та Fiddler-записи. Докладно — `fuzz/README.md`.
+
+```bash
+pip install ".[test,fuzz]"       # Hypothesis
+python fuzz/run.py -j 4          # усі фазери; код 1 — є знахідки
 ```
 
 ## CI

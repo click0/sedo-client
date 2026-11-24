@@ -206,6 +206,10 @@ sedo-client/
 │   ├── iit_unpack.sh           — unpacks an IIT installer without running it
 │   ├── iit_inventory.py        — DLL inventory / diff / registry (stdlib PE parser)
 │   └── check_version.py        — version gate used by CI and release.yml
+├── fuzz/                       — fuzz harnesses for the code that parses foreign data
+│   ├── run.py                  — run all or some of them (python fuzz/run.py)
+│   ├── fz_*.py                 — one per source of data; see fuzz/README.md
+│   └── README.md               — what is checked and what to do with a finding
 ├── ansible/
 │   ├── inventory/
 │   │   ├── hosts.yml
@@ -310,6 +314,16 @@ python sedo_client.py --backend pkcs11 --fetch     # module found there, PIN ask
 pip install ".[test,analysis]"   # pytest + pefile (inventory cross-check)
 python -m pytest tests/ -v
 python scripts/check_version.py  # Version: headers match pyproject
+```
+
+The fuzz harnesses are run separately, by hand (they are not in CI): they feed
+generated data to the code that parses SEDO and agent responses, `pkcs11-tool`
+output, config and PIN files and Fiddler captures. Details: `fuzz/README.md`
+(in Ukrainian).
+
+```bash
+pip install ".[test,fuzz]"       # Hypothesis
+python fuzz/run.py -j 4          # every harness; exit code 1 means findings
 ```
 
 ## CI
