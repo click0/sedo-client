@@ -7,8 +7,9 @@ Run the fuzz harnesses of this directory and say what they found.
     python fuzz/run.py -j 4                 four harnesses at a time
     python fuzz/run.py --list
 
-Each harness is a separate process (python fuzz/fz_<name>.py works on its own
-too). Exit code: 0 nothing found, 1 findings, 2 a harness itself failed.
+Each harness lives in its own directory, fuzz/<name>/fz_<name>.py, and is a
+separate process (it runs on its own too); fuzz/shared/ holds what they share.
+Exit code: 0 nothing found, 1 findings, 2 a harness itself failed.
 """
 import argparse
 import concurrent.futures
@@ -39,7 +40,7 @@ HARNESSES = {
 def run_one(name: str, env: dict, out: Path, timeout: int) -> tuple:
     started = time.monotonic()
     try:
-        r = subprocess.run([sys.executable, str(HERE / f"fz_{name}.py")], env=env, capture_output=True,
+        r = subprocess.run([sys.executable, str(HERE / name / f"fz_{name}.py")], env=env, capture_output=True,
                            text=True, encoding="utf-8", errors="replace", timeout=timeout)
         code, text = r.returncode, r.stdout + r.stderr
         # A harness that dies on import also exits 1: findings are only what a report lists.

@@ -208,7 +208,8 @@ sedo-client/
 │   └── check_version.py        — version gate used by CI and release.yml
 ├── fuzz/                       — fuzz harnesses for the code that parses foreign data
 │   ├── run.py                  — run all or some of them (python fuzz/run.py)
-│   ├── fz_*.py                 — one per source of data; see fuzz/README.md
+│   ├── shared/                 — common.py, strategies.py: budget, seed, findings
+│   ├── <name>/fz_<name>.py     — one directory per source of data; see fuzz/README.md
 │   └── README.md               — what is checked and what to do with a finding
 ├── ansible/
 │   ├── inventory/

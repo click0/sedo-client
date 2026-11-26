@@ -207,7 +207,8 @@ sedo-client/
 │   └── check_version.py        — гейт версії для CI і release.yml
 ├── fuzz/                       — фазери для коду, що розбирає чужі дані
 │   ├── run.py                  — запуск усіх або вибраних (python fuzz/run.py)
-│   ├── fz_*.py                 — по одному на джерело даних; див. fuzz/README.md
+│   ├── shared/                 — common.py, strategies.py: бюджет, seed, знахідки
+│   ├── <назва>/fz_<назва>.py   — тека на кожне джерело даних; див. fuzz/README.md
 │   └── README.md               — що перевіряється і що робити зі знахідкою
 ├── ansible/
 │   ├── inventory/

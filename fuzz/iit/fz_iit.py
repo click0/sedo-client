@@ -3,7 +3,7 @@ import base64
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "shared"))
 from common import PIN, exc_chain_text, finding, main, response, tb_key, trap_logs  # noqa: E402
 from strategies import JSON, SET, dumps, texts  # noqa: E402
 from hypothesis import given, settings, strategies as st  # noqa: E402

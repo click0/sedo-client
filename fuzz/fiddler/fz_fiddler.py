@@ -17,7 +17,7 @@ import zipfile
 import zlib
 from urllib.parse import quote
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "shared"))
 from common import N, ROOT, SEED, TMP, finding, main, rnd, save, tb_key  # noqa: E402
 
 # FA_SCRIPT: another copy of the script — an older one, to see that the harness

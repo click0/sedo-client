@@ -23,7 +23,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "shared"))
 from common import N, ROOT, TESTS, finding, main, rnd  # noqa: E402
 
 import sedo.config as cfg  # noqa: E402
