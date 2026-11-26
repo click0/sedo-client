@@ -1,6 +1,6 @@
 """
-Shared by every harness in fuzz/: where the code under test is, the budget and
-the seed, the list of findings, an HTTP response double and a log trap.
+Shared by every harness in fuzz/<name>/: where the code under test is, the
+budget and the seed, the list of findings, an HTTP response double and a log trap.
 
 No third-party imports here: the mutation harnesses run on the standard library
 (plus what the client itself needs). Hypothesis strategies live in strategies.py.
@@ -17,7 +17,7 @@ import tempfile
 import traceback
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]       # fuzz/shared/common.py → the checkout
 TESTS = ROOT / "tests"                     # two harnesses borrow builders from the tests
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -116,7 +116,7 @@ def tb_key(exc) -> str:
     """'ExcType @ file:line in func' of the innermost frame inside the repository."""
     frames = traceback.extract_tb(exc.__traceback__)
     mine = [f for f in frames if Path(f.filename).resolve().is_relative_to(ROOT)
-            and Path(f.filename).resolve().parent != ROOT / "fuzz"]
+            and not Path(f.filename).resolve().is_relative_to(ROOT / "fuzz")]
     f = (mine or frames)[-1]
     return f"{type(exc).__name__} @ {os.path.basename(f.filename)}:{f.lineno} in {f.name}"
 

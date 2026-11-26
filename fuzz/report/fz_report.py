@@ -6,7 +6,7 @@ import os
 import sys
 import urllib.error
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "shared"))
 from common import N, finding, main, tb_key  # noqa: E402
 from strategies import JSON, SET, dumps, mostly, texts  # noqa: E402
 from hypothesis import given, settings, strategies as st  # noqa: E402

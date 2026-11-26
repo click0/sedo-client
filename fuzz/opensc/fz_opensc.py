@@ -7,7 +7,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "shared"))
 from common import PIN, TMP, exc_chain_text, finding, main, tb_key, trap_logs  # noqa: E402
 from strategies import SET, texts  # noqa: E402
 from hypothesis import given, settings, strategies as st  # noqa: E402

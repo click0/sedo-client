@@ -11,7 +11,7 @@ import os
 import subprocess
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "shared"))
 from common import N, TESTS, finding, main, rnd  # noqa: E402
 
 sys.path.insert(0, str(TESTS))

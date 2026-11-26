@@ -7,6 +7,15 @@ Contact:  github.com/click0
 License:  BSD 3-Clause "New" or "Revised" License
 ```
 
+## v0.38 — unreleased
+
+### Змінено
+
+- **Кожен фазер — у своїй теці:** `fuzz/<назва>/fz_<назва>.py`, спільне
+  (`common.py`, `strategies.py`) — у `fuzz/shared/`. Запуск усіх той самий,
+  `python fuzz/run.py -j 4`; один фазер окремо — `python
+  fuzz/client/fz_client.py`. Що перевіряють фазери, не змінилося.
+
 ## v0.37 — 2026-11-24
 
 ### Головне

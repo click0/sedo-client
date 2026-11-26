@@ -30,8 +30,9 @@ npx cspell@9 --config .cspell.json "**/*.md" "**/*.py" "**/*.yml" "**/*.yaml" "*
 python -m build --wheel && pip install --force-reinstall --no-deps dist/*.whl && sedo-client --help
 ```
 
-Фазери (`fuzz/`, опис у `fuzz/README.md`) у CI не входять. Ганяти руками
-перед релізом і після змін у коді, що розбирає чужі дані:
+Фазери (`fuzz/<назва>/fz_<назва>.py`, спільне — `fuzz/shared/`, опис у
+`fuzz/README.md`) у CI не входять. Ганяти руками перед релізом і після змін
+у коді, що розбирає чужі дані:
 
 ```bash
 pip install ".[test,fuzz]" && python fuzz/run.py -j 4      # код 1 — є знахідки

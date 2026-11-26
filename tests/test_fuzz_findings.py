@@ -49,11 +49,21 @@ FUZZ = Path(__file__).resolve().parent.parent / "fuzz"
 class TestFuzzDirectory:
     """fuzz/ is run by hand, not in CI: at least keep the files, the runner and the README in step."""
 
-    HARNESSES = sorted(p.stem[3:] for p in FUZZ.glob("fz_*.py"))
+    # Each harness in its own directory: fuzz/<name>/fz_<name>.py; fuzz/shared/ is common.
+    HARNESSES = sorted(p.parent.name for p in FUZZ.glob("*/fz_*.py"))
+    # The one use of __file__ a harness may have: finding fuzz/shared/.
+    SHARED = 'sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "shared"))'
+
+    def test_one_directory_per_harness(self):
+        assert self.HARNESSES
+        for path in FUZZ.glob("*/fz_*.py"):
+            assert path.name == f"fz_{path.parent.name}.py", path
+        assert not list(FUZZ.glob("fz_*.py")), "a harness left in fuzz/ itself"
+        assert sorted(p.name for p in (FUZZ / "shared").glob("*.py")) == ["common.py", "strategies.py"]
+        assert len(list(FUZZ.glob("*/fz_*.py"))) == len(self.HARNESSES)
 
     def test_every_harness_compiles(self):
-        assert self.HARNESSES
-        for path in sorted(FUZZ.glob("*.py")):
+        for path in sorted(FUZZ.rglob("*.py")):
             compile(path.read_text(encoding="utf-8"), str(path), "exec")
 
     def test_the_runner_and_the_readme_list_them_all(self):
@@ -63,14 +73,15 @@ class TestFuzzDirectory:
                       if isinstance(node, ast.Assign) and node.targets[0].id == "HARNESSES")
         assert sorted(listed) == self.HARNESSES
         readme = (FUZZ / "README.md").read_text(encoding="utf-8")
-        assert all(f"`fz_{name}.py`" in readme for name in self.HARNESSES)
+        assert all(f"`{name}/fz_{name}.py`" in readme for name in self.HARNESSES)
 
     def test_nothing_is_written_next_to_the_harnesses(self):
         # Reproducers go to $FUZZ_OUT / a temp dir (common.save); a PE or a .saz
         # left in the tree could end up in a commit.
-        for path in sorted(FUZZ.glob("fz_*.py")):
+        for path in sorted(FUZZ.glob("*/fz_*.py")):
             text = path.read_text(encoding="utf-8")
-            assert "dirname(__file__)" not in text.replace("sys.path.insert(0, os.path.dirname(", ""), path.name
+            assert text.count(self.SHARED) == 1, path.name
+            assert "__file__" not in text.replace(self.SHARED, ""), path.name
             assert "tempfile.tempdir" not in text, path.name          # common.py owns the private temp dir
 
 
