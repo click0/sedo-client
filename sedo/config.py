@@ -275,6 +275,14 @@ def _build(merged: dict, sources: list, roles_from_local: bool = False) -> Confi
             p.mechanism = str(p.mechanism)
             if not _MECH_RE.fullmatch(p.mechanism):
                 raise ConfigError(f"{where}.mechanism must look like \"0x80420031\"")
+            # A pinned mechanism skips discovery, and with it the guard that
+            # keeps choose_sign_mechanism off the MACs: "0x80420014" (the id
+            # OPENSC-QUICKSTART gave before 0.29) went to C_Sign as it was.
+            from .mechanism_ids import NON_SIGNATURE_MECHANISMS
+            if int(p.mechanism, 16) in NON_SIGNATURE_MECHANISMS:
+                raise ConfigError(f"{where}.mechanism = {p.mechanism!r} is a MAC (CKF_SIGN, but not "
+                                  "a DSTU 4145 signature; SEDO rejects it): use 0x80420031, or "
+                                  "leave mechanism out to take the token's own")
         for field in ("module", "key_file", "pin_env", "pin_file", "pin"):
             value = getattr(p, field)
             if value is not None and not isinstance(value, str):
@@ -418,26 +426,29 @@ def resolve_profile_pin(profile: KeyProfile, argv_pin: Optional[str] = None,
                         allow_generic_env: bool = True, env: Optional[dict] = None) -> str:
     """
     PIN for one profile: --pin → profile.pin → $<pin_env> → $SEDO_PIN (only when
-    allowed) → pin_file → prompt. Empty → exit 2 (see _console.read_pin).
+    allowed) → pin_file → prompt. Empty, or with what nobody types
+    (_console.pin_problem) → exit 2 (see _console.read_pin).
 
     ``allow_generic_env`` is False for a sign profile that differs from the
     auth one: the generic SEDO_PIN belongs to the login key, and sending it to
     another token would spend one of ITS attempts.
     """
-    from ._console import PIN_ENV, read_pin
+    from ._console import PIN_ENV, check_pin, read_pin
     env = os.environ if env is None else env
+    # Every source is checked like pin_file (_console.pin_problem): a CR from
+    # $(cat file), a space before cmd's &&, a zero-width character → exit 2.
     if argv_pin:
-        return argv_pin
+        return check_pin(argv_pin, "--pin")
     if profile.pin:
         log.warning("PIN for profile %r taken from the config file", profile.name)
-        return profile.pin
+        return check_pin(profile.pin, f"[keys.{profile.name}].pin")
     env_vars = [profile.effective_pin_env]
     if allow_generic_env:
         env_vars.append(PIN_ENV)
     for var in env_vars:
         value = env.get(var)
         if value:
-            return value
+            return check_pin(value, f"${var}")
     if profile.pin_file:
         path = Path(profile.pin_file).expanduser()
         try:

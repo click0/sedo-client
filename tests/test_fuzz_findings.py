@@ -1,5 +1,5 @@
 """
-Regressions for what the fuzzing round before 0.37 found.
+Regressions for what the fuzzing rounds before 0.37 and 0.38 found.
 
 Each harness fed one parser of foreign data — SEDO responses, the IIT agent,
 pkcs11-tool output, config and PIN files, the report summary, PE headers —
@@ -584,3 +584,178 @@ class TestOnePinVariablePerProfile:
         text = '[keys."вхід"]\nbackend = "opensc"\n[keys."підпис"]\nbackend = "pkcs11"\n[roles]\nauth = "вхід"\n'
         cfg = _load(tmp_path, text.encode("utf-8"))
         assert [p.name for p in cfg.distinct_profiles()] == ["вхід"]
+
+
+# ─── the PyKCS11 backends (round before 0.38) ───────────────
+
+def _pykcs11_signer(backend, tmp_path):
+    from sedo.pkcs11_signer import PKCS11Signer
+    from sedo.virtual_signer import VirtualSigner
+    dll = tmp_path / "token.dll"
+    dll.write_bytes(b"fake module")
+    return PKCS11Signer(str(dll)) if backend == "pkcs11" else VirtualSigner(module_path=str(dll))
+
+
+@pytest.mark.parametrize("backend", ["pkcs11", "virtual"])
+class TestWhatTheTokenHandsBack:
+    """
+    Checked like the agent's and pkcs11-tool's answers: an empty certificate
+    or signature went on as a success, and a CKR_* error came out as a bare
+    PyKCS11Error instead of the RuntimeError every backend raises.
+    """
+
+    @pytest.fixture
+    def token(self, fake_pykcs11):
+        fake_pykcs11.MECHS = {0x80420031: fake_pykcs11.CKF_SIGN}
+        return fake_pykcs11
+
+    @pytest.mark.parametrize("value,match", [
+        (b"", "empty certificate"), ([], "empty certificate"),
+        (None, "unreadable"),            # real PyKCS11 on CKR_ATTRIBUTE_SENSITIVE / TYPE_INVALID
+    ])
+    def test_no_certificate(self, token, tmp_path, backend, value, match):
+        token.CERT_DER = value
+        with _pykcs11_signer(backend, tmp_path) as s:
+            s.login(PIN)
+            with pytest.raises(RuntimeError, match=match):
+                s.get_certificate()
+
+    def test_a_ckr_error_reading_the_certificate(self, token, tmp_path, backend):
+        with _pykcs11_signer(backend, tmp_path) as s:
+            s.login(PIN)
+
+            def refuse(obj, attrs):
+                raise token.PyKCS11Error("CKR_DEVICE_ERROR (0x00000030)")
+            s._session.getAttributeValue = refuse
+            with pytest.raises(RuntimeError, match="CKR_DEVICE_ERROR"):
+                s.get_certificate()
+
+    @pytest.mark.parametrize("value", [b"", []])
+    def test_an_empty_signature(self, token, tmp_path, backend, value):
+        token.SIGNATURE = value
+        with _pykcs11_signer(backend, tmp_path) as s:
+            s.login(PIN)
+            with pytest.raises(RuntimeError, match="empty signature"):
+                s.sign(b"document")
+
+    def test_a_slot_that_is_not_there(self, token, tmp_path, backend, monkeypatch):
+        def no_slot(self, slot, flags):
+            raise token.PyKCS11Error("CKR_SLOT_ID_INVALID (0x00000003)")
+        monkeypatch.setattr(token.PyKCS11Lib, "openSession", no_slot)
+        with _pykcs11_signer(backend, tmp_path) as s:
+            with pytest.raises(RuntimeError, match="CKR_SLOT_ID_INVALID") as e:
+                s.login(PIN, slot=7)
+        assert PIN not in str(e.value)
+
+    def test_a_ckr_error_after_the_login_closes_the_session(self, token, tmp_path, backend, monkeypatch):
+        opened = token.PyKCS11Lib.openSession
+
+        def pulled_out(self, slot, flags):
+            session = opened(self, slot, flags)
+
+            def gone(template):
+                raise token.PyKCS11Error("CKR_DEVICE_REMOVED (0x00000032)")
+            session.findObjects = gone
+            return session
+        monkeypatch.setattr(token.PyKCS11Lib, "openSession", pulled_out)
+        with _pykcs11_signer(backend, tmp_path) as s:
+            with pytest.raises(RuntimeError, match="CKR_DEVICE_REMOVED"):
+                s.login(PIN)
+        assert token.SESSIONS and all(session.closed for session in token.SESSIONS)
+
+
+def test_sign_file_writes_no_empty_signature(fake_pykcs11, tmp_path, monkeypatch, caplog):
+    # It wrote a 0-byte .sig and printed "✓ Signature: … (0 bytes, raw …)".
+    from sedo.client import main
+    fake_pykcs11.MECHS = {0x80420031: fake_pykcs11.CKF_SIGN}
+    fake_pykcs11.SIGNATURE = b""
+    dll = tmp_path / "token.dll"
+    dll.write_bytes(b"fake module")
+    local = tmp_path / "config_local.toml"
+    local.write_text(f'[keys.doc]\nbackend = "pkcs11"\nmodule = {json.dumps(str(dll))}\n'
+                     '[roles]\nauth = "doc"\nsign = "doc"\n', encoding="utf-8")
+    doc = tmp_path / "order.pdf"
+    doc.write_bytes(b"document")
+    monkeypatch.setenv("SEDO_PIN_DOC", PIN)
+    monkeypatch.setattr(sys, "argv", ["sedo-client", "--config", str(local), "--sign-file", str(doc)])
+    with pytest.raises(SystemExit) as e:
+        main()
+    assert e.value.code == 1 and "empty signature" in caplog.text
+    assert not (tmp_path / "order.pdf.sig").exists()
+
+
+def test_standard_mechanism_names_are_those_of_pkcs11t_h():
+    # Shifted by one id: 0x1041 (CKM_ECDSA) was shown as CKM_EC_KEY_PAIR_GEN.
+    from sedo.pkcs11_signer import CKM_STANDARD
+    assert CKM_STANDARD == {
+        0x0: "CKM_RSA_PKCS_KEY_PAIR_GEN", 0x1: "CKM_RSA_PKCS", 0x220: "CKM_SHA_1", 0x250: "CKM_SHA256",
+        0x1040: "CKM_EC_KEY_PAIR_GEN", 0x1041: "CKM_ECDSA", 0x1042: "CKM_ECDSA_SHA1",
+    }
+
+
+class TestPinnedMechanism:
+    """A pinned mechanism skips discovery, and with it the guard that keeps the MACs out."""
+
+    @pytest.mark.parametrize("mech", ["0x80420014", "0x80420015"])
+    def test_a_mac_is_refused_in_the_config(self, tmp_path, mech):
+        text = f'[keys.login]\nbackend = "pkcs11"\nmechanism = "{mech}"\n'
+        with pytest.raises(sc.ConfigError, match=r"\[keys\.login\]\.mechanism = .* is a MAC"):
+            _load(tmp_path, text.encode("utf-8"))
+
+    def test_the_dstu_id_is_still_accepted(self, tmp_path):
+        cfg = _load(tmp_path, b'[keys.login]\nbackend = "pkcs11"\nmechanism = "0x80420031"\n')
+        assert cfg.profile("auth").mechanism == "0x80420031"
+
+
+# ─── PINs from the environment, --pin and the prompt ────────
+
+class TestEveryPinSource:
+    """
+    Read as strictly as pin_file: a CR from $(cat pin.txt), the space cmd keeps
+    before && in `set SEDO_PIN=1234 && …`, a zero-width character from a chat.
+    Each is a wrong PIN on every run — one of the 15 attempts of an Almaz-1K.
+    """
+
+    BAD = ["1234\r", "1234\n", "1234 ", " 1234", "   ", "1234​", "12\x0034", "1234 ", "12\n34"]
+
+    @pytest.mark.parametrize("pin", BAD)
+    @pytest.mark.parametrize("source,named", [("argv", "--pin"), ("profile", "[keys.login].pin"),
+                                              ("env", "$SEDO_PIN_LOGIN"), ("generic", "$SEDO_PIN")])
+    def test_refused_before_the_token_sees_it(self, pin, source, named, capsys):
+        profile = sc.KeyProfile("login", pin=pin if source == "profile" else None)
+        env = {"env": {"SEDO_PIN_LOGIN": pin}, "generic": {"SEDO_PIN": pin}}.get(source, {})
+        with patch("getpass.getpass", side_effect=AssertionError("must not fall through to a prompt")):
+            with pytest.raises(SystemExit) as e:
+                sc.resolve_profile_pin(profile, pin if source == "argv" else None, env=env)
+        err = capsys.readouterr().err
+        assert e.value.code == 2 and named in err and "not sending it to the token" in err
+        assert "1234" not in err and "\x00" not in err
+
+    @pytest.mark.parametrize("pin", ["1234", "12 34", PIN, "пін-1234"])
+    def test_what_is_typed_passes_unchanged(self, pin):
+        assert sc.resolve_profile_pin(sc.KeyProfile("login"), None, env={"SEDO_PIN_LOGIN": pin}) == pin
+        assert sc.resolve_profile_pin(sc.KeyProfile("login"), pin, env={}) == pin
+
+    @pytest.mark.parametrize("env,typed,named", [
+        ("1234\r", None, "$SEDO_PIN"), (None, "1234 ", "the prompt"),
+    ])
+    def test_the_standalone_tools_too(self, monkeypatch, capsys, env, typed, named):
+        from sedo._console import read_pin
+        if env is None:
+            monkeypatch.delenv("SEDO_PIN", raising=False)
+        else:
+            monkeypatch.setenv("SEDO_PIN", env)
+        with patch("getpass.getpass", return_value=typed):
+            with pytest.raises(SystemExit) as e:
+                read_pin(None)
+        assert e.value.code == 2 and named in capsys.readouterr().err
+
+    @pytest.mark.parametrize("var", ["SEDO_PIN_LOGIN", "SEDO_PIN"])
+    def test_check_finds_it_without_a_token(self, monkeypatch, var):
+        for name in ("SEDO_PIN", "SEDO_PIN_LOGIN"):
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setenv(var, "1234\r")
+        level, text = chk._pin_source(sc.KeyProfile("login"), True)
+        assert level == chk.FAIL and f"${var}" in text and "1234" not in text
+        monkeypatch.setenv(var, "1234")
+        assert chk._pin_source(sc.KeyProfile("login"), True)[0] == chk.OK

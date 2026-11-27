@@ -9,6 +9,7 @@ License:  BSD 3-Clause "New" or "Revised" License
 Year:     2025-2026
 """
 
+import contextlib
 import logging
 import os
 import re
@@ -240,6 +241,20 @@ def select_key_and_cert(session, P, preferred_id: Optional[bytes] = None):
     return keys[0], (certs[0] if certs else None)
 
 
+@contextlib.contextmanager
+def token_errors(P, what: str):
+    """
+    Re-raise a PyKCS11Error as RuntimeError — the contract every backend keeps
+    for a token failure (authorize() collects those into "All auth flows
+    failed"). A bare PyKCS11Error escaped past that and past the CLI's error
+    handling. PyKCS11 messages name the CKR_* code, never the PIN.
+    """
+    try:
+        yield
+    except getattr(P, "PyKCS11Error", ()) as e:
+        raise RuntimeError(f"{what}: {e}") from e
+
+
 def open_logged_in_session(lib, P, slot: int, pin: str):
     """
     C_OpenSession + C_Login, closing the session if anything after the open
@@ -247,33 +262,70 @@ def open_logged_in_session(lib, P, slot: int, pin: str):
     and each retry leaked another handle — on an Almaz-1K with a small
     session limit a few retries end in CKR_SESSION_COUNT.
     """
-    session = lib.openSession(slot, P.CKF_RW_SESSION | P.CKF_SERIAL_SESSION)
-    try:
-        session.login(pin)
-    except Exception as e:
-        close_session(session)
-        # RuntimeError is the contract every backend keeps for a token failure
-        # (authorize() collects it into "All auth flows failed"); a bare
-        # PyKCS11Error escaped past that and past the CLI's error handling.
-        if isinstance(e, getattr(P, "PyKCS11Error", ())):
-            raise RuntimeError(f"PKCS#11 login failed: {e}") from e
-        raise
+    # CKR_SLOT_ID_INVALID (an explicit slot that is not there),
+    # CKR_TOKEN_NOT_PRESENT (the token pulled out after getSlotList).
+    with token_errors(P, f"PKCS#11 cannot open a session on slot {slot}"):
+        session = lib.openSession(slot, P.CKF_RW_SESSION | P.CKF_SERIAL_SESSION)
+    with token_errors(P, "PKCS#11 login failed"):
+        try:
+            session.login(pin)
+        except BaseException:
+            close_session(session)
+            raise
     return session
+
+
+def read_certificate(session, P, cert_obj) -> bytes:
+    """
+    CKA_VALUE of the certificate, or RuntimeError.
+
+    An empty value went on as a 0-byte certificate: authorize() sent it to
+    SEDO and logged "Got certificate: 0 bytes" as a success. Real PyKCS11
+    gives None for an attribute the token refuses to show
+    (CKR_ATTRIBUTE_SENSITIVE / TYPE_INVALID), which ended in "cannot convert
+    'NoneType' object to bytes"; other CKR_* codes came out as a bare
+    PyKCS11Error.
+    """
+    with token_errors(P, "cannot read the certificate (CKA_VALUE)"):
+        value = session.getAttributeValue(cert_obj, [P.CKA_VALUE])[0]
+    if value is None:
+        raise RuntimeError("the token does not give out the certificate (CKA_VALUE unreadable)")
+    try:
+        der = bytes(value)
+    except (TypeError, ValueError) as e:
+        raise RuntimeError(f"the certificate (CKA_VALUE) is not bytes: {type(value).__name__}") from e
+    if not der:
+        raise RuntimeError("the token holds an empty certificate (CKA_VALUE has 0 bytes)")
+    return der
+
+
+def sign_with(session, P, key, data: bytes, mechanism: int) -> bytes:
+    """
+    C_Sign, or RuntimeError. A 0-byte result is a failure, not a signature:
+    --sign-file wrote an empty .sig and printed ✓, authorize() sent it.
+    """
+    with token_errors(P, f"sign failed (mechanism 0x{mechanism:08X})"):
+        signature = session.sign(key, data, P.Mechanism(mechanism, None))
+    if not signature:
+        raise RuntimeError(f"the token returned an empty signature (mechanism 0x{mechanism:08X})")
+    return bytes(signature)
 
 
 class PKCS11NotAvailable(Exception):
     """PyKCS11 не встановлено або модуль не знайдено."""
 
 
-# Стандартні PKCS#11 mechanisms (для identification)
+# Стандартні PKCS#11 mechanisms (для identification), як у pkcs11t.h. До 0.38
+# імена RSA та EC стояли на сусідніх id: 0x1042 (ECDSA_SHA1) показувався як
+# CKM_ECDSA, 0x1 (RSA_PKCS) — як KEY_PAIR_GEN.
 CKM_STANDARD = {
-    0x00000002: "CKM_RSA_PKCS",
-    0x00000001: "CKM_RSA_PKCS_KEY_PAIR_GEN",
+    0x00000000: "CKM_RSA_PKCS_KEY_PAIR_GEN",
+    0x00000001: "CKM_RSA_PKCS",
     0x00000220: "CKM_SHA_1",
     0x00000250: "CKM_SHA256",
-    0x00001041: "CKM_EC_KEY_PAIR_GEN",
-    0x00001042: "CKM_ECDSA",
-    0x00001043: "CKM_ECDSA_SHA1",
+    0x00001040: "CKM_EC_KEY_PAIR_GEN",
+    0x00001041: "CKM_ECDSA",
+    0x00001042: "CKM_ECDSA_SHA1",
 }
 
 class PKCS11Signer:
@@ -470,13 +522,14 @@ class PKCS11Signer:
         slot = resolve_slot(self._pkcs11, slot, "token connected")
         session = open_logged_in_session(self._pkcs11, self._PyKCS11, slot, pin)
         try:
-            key, cert = select_key_and_cert(session, self._PyKCS11, self._cert_id)
-            if key is None:
-                raise RuntimeError("No private keys on token")
-            mech = self._pinned_mechanism or self._sign_mechanism
-            if mech is None or (self._pinned_mechanism is None and slot != self._slot):
-                mech = self.find_sign_mechanism(slot=slot)
-        except Exception:
+            with token_errors(self._PyKCS11, "PKCS#11 token query failed"):
+                key, cert = select_key_and_cert(session, self._PyKCS11, self._cert_id)
+                if key is None:
+                    raise RuntimeError("No private keys on token")
+                mech = self._pinned_mechanism or self._sign_mechanism
+                if mech is None or (self._pinned_mechanism is None and slot != self._slot):
+                    mech = self.find_sign_mechanism(slot=slot)
+        except BaseException:
             close_session(session)
             raise
 
@@ -491,8 +544,7 @@ class PKCS11Signer:
             raise RuntimeError("Not logged in")
         if self._cert_obj is None:
             raise RuntimeError("No certificates")
-        attrs = self._session.getAttributeValue(self._cert_obj, [self._PyKCS11.CKA_VALUE])
-        return bytes(attrs[0])
+        return read_certificate(self._session, self._PyKCS11, self._cert_obj)
 
     def sign(self, data: bytes, mechanism: Optional[int] = None) -> bytes:
         """Підписати дані знайденим (або явно заданим) mechanism."""
@@ -502,13 +554,7 @@ class PKCS11Signer:
             mechanism = self._sign_mechanism
         if mechanism is None:
             raise RuntimeError("No sign mechanism. Use find_sign_mechanism() first")
-
-        mech = self._PyKCS11.Mechanism(mechanism, None)
-        try:
-            signature = self._session.sign(self._priv_key, data, mech)
-        except self._PyKCS11.PyKCS11Error as e:
-            raise RuntimeError(f"sign failed: {e} (mechanism 0x{mechanism:08X})") from e
-        return bytes(signature)
+        return sign_with(self._session, self._PyKCS11, self._priv_key, data, mechanism)
 
     def logout(self) -> None:
         if self._session:

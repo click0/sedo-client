@@ -155,7 +155,7 @@ class VirtualSigner:
     def login(self, pin: str, slot: Optional[int] = None) -> None:
         from .pkcs11_signer import (check_almaz_mutex, close_session,
                                    open_logged_in_session, resolve_slot,
-                                   select_key_and_cert)
+                                   select_key_and_cert, token_errors)
         held = check_almaz_mutex()
         if held:
             log.warning(
@@ -173,13 +173,14 @@ class VirtualSigner:
         slot = resolve_slot(self._pkcs11, slot, "virtual token slot available")
         session = open_logged_in_session(self._pkcs11, self._PyKCS11, slot, pin)
         try:
-            key, cert = select_key_and_cert(session, self._PyKCS11, self._cert_id)
-            if key is None:
-                raise RuntimeError("No private keys in virtual token")
-            mech = self._pinned_mechanism or self._sign_mechanism
-            if mech is None or (self._pinned_mechanism is None and slot != self._slot):
-                mech = self._find_sign_mechanism(slot=slot)
-        except Exception:
+            with token_errors(self._PyKCS11, "virtual token query failed"):
+                key, cert = select_key_and_cert(session, self._PyKCS11, self._cert_id)
+                if key is None:
+                    raise RuntimeError("No private keys in virtual token")
+                mech = self._pinned_mechanism or self._sign_mechanism
+                if mech is None or (self._pinned_mechanism is None and slot != self._slot):
+                    mech = self._find_sign_mechanism(slot=slot)
+        except BaseException:
             close_session(session)
             raise
 
@@ -193,10 +194,8 @@ class VirtualSigner:
             raise RuntimeError("Not logged in")
         if self._cert_obj is None:
             raise RuntimeError("No certificates in virtual token")
-        attrs = self._session.getAttributeValue(
-            self._cert_obj, [self._PyKCS11.CKA_VALUE]
-        )
-        return bytes(attrs[0])
+        from .pkcs11_signer import read_certificate
+        return read_certificate(self._session, self._PyKCS11, self._cert_obj)
 
     def sign(self, data: bytes, mechanism: Optional[int] = None) -> bytes:
         if not self._session or not self._priv_key:
@@ -205,13 +204,8 @@ class VirtualSigner:
             mechanism = self._sign_mechanism
         if mechanism is None:
             raise RuntimeError("No sign mechanism discovered")
-
-        mech = self._PyKCS11.Mechanism(mechanism, None)
-        try:
-            signature = self._session.sign(self._priv_key, data, mech)
-        except self._PyKCS11.PyKCS11Error as e:
-            raise RuntimeError(f"sign failed: {e} (mechanism 0x{mechanism:08X})") from e
-        return bytes(signature)
+        from .pkcs11_signer import sign_with
+        return sign_with(self._session, self._PyKCS11, self._priv_key, data, mechanism)
 
     def logout(self) -> None:
         if self._session:
