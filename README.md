@@ -278,8 +278,13 @@ sessions and two PINs. PINs are never stored: a profile reads
 `SEDO_PIN_<NAME>` (the `auth` key also accepts plain `SEDO_PIN`), a `pin_file`,
 or asks interactively. A `pin_file` is one line of UTF-8 (a BOM, and UTF-16
 with a BOM as PowerShell 5 writes it, are read; a second line or an invisible
-character is an error, not a PIN). If two profiles end up with the same default
-variable (names in Cyrillic both give `SEDO_PIN__`), the client stops and asks
+character is an error, not a PIN). A PIN from `--pin`, a variable or the prompt
+is checked the same way: a space at either end (cmd keeps the one before `&&` in
+`set SEDO_PIN=… && …`), a CR left by `$(cat pin.txt)` or an invisible character
+stops the client with exit code 2 before the token sees it. A profile's
+`mechanism` cannot be one of the MACs `0x80420014` / `0x80420015`. If two
+profiles end up with the same default variable (names in Cyrillic both give
+`SEDO_PIN__`), the client stops and asks
 for a `pin_env`. `--sign-file FILE` signs a file with the `sign` profile
 without touching SEDO — the way to check the document key today, since SEDO's
 own document-signing endpoints still need a Fiddler capture.

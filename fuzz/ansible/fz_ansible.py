@@ -79,27 +79,33 @@ def fuzz_vault_pins():
     (work / "vault.yml").write_text(
         "pins:\n" + "".join(f"  {name}: {text}\n" for name, (text, _) in cases.items()), encoding="utf-8")
     plays = {"sedo_daily_linux.yml": playbook._text(playbook.LINUX), "sedo_daily.yml": playbook._text(playbook.WINDOWS)}
+    # sedo_pins is built inside the same template as each expression, and the
+    # loop runs over the case NAMES. ansible-core <= 2.18 turns the result of
+    # a template into text and back with ast.literal_eval: a dict holding the
+    # float inf/nan (.inf, .nan) or a date (2026-11-24) does not come back,
+    # and "loop: {{ pins | dict2items }}" failed with "Invalid data passed to
+    # 'loop'" before a single case ran. In the playbooks sedo_pins comes from
+    # vault.yml as it is, without that round trip.
+    own_pins = "{% set sedo_pins = {'SEDO_PIN': pins[item]} %}"
     tasks = []
     for name, text in plays.items():
         guard = playbook._folded(text, "pins_not_text")
         # Linux: NAME=VALUE lines on stdin. Windows: the value becomes an environment variable.
         arrives = playbook._folded(text, "stdin") if "linux" in name else "{{ 'SEDO_PIN=' ~ sedo_pins.SEDO_PIN }}"
         assert "sedo_pins" in arrives and "rejectattr" in guard, name
+        assert "{%" not in guard + arrives, name
         key = name.split(".")[0]
         tasks.append(f"""
     - name: Each PIN through the expressions of {name}
       ansible.builtin.set_fact:
-        {key}: "{{{{ {key} | default({{}}) | combine({{item.key: {{'refused': refused, 'arrives': arrives}}}}) }}}}"
+        {key}: "{{{{ {key} | default({{}}) | combine({{item: {{'refused': refused, 'arrives': arrives}}}}) }}}}"
       vars:
-        sedo_pins: "{{{{ {{'SEDO_PIN': item.value}} }}}}"
         pins_not_text: >-
-          {guard}
+          {own_pins}{guard}
         refused: "{{{{ pins_not_text | length > 0 }}}}"
         arrives: >-
-          {arrives}
-      loop: "{{{{ pins | dict2items }}}}"
-      loop_control:
-        label: "{{{{ item.key }}}}"
+          {own_pins}{arrives}
+      loop: "{{{{ pins | list }}}}"
 """)
     keys = [name.split(".")[0] for name in plays]
     everything = ", ".join(f"'{k}': {k}" for k in keys)

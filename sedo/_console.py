@@ -11,9 +11,10 @@ Year:     2025-2026
 
 import os
 import sys
+import unicodedata
 from typing import Optional
 
-__all__ = ["force_utf8_io", "read_pin", "module_from_env",
+__all__ = ["force_utf8_io", "read_pin", "pin_problem", "check_pin", "module_from_env",
            "PIN_ENV", "MODULE_ENV", "MODULE_DIRS_ENV"]
 
 # Environment variable every CLI accepts instead of --pin (argv is visible in
@@ -63,23 +64,62 @@ def read_pin(argv_pin: Optional[str], prompt: str = "Token PIN: ",
     ``env_vars``: environment variables tried in order (default: SEDO_PIN;
     sedo_config passes the profile-specific ones, or none).
 
+    A PIN with what nobody types (see pin_problem) is refused the same way.
+
     Raises SystemExit (exit code 2, like an argparse usage error).
     """
-    pin = argv_pin
+    pin, source = argv_pin, "--pin"
     for var in env_vars:
         if pin:
             break
-        pin = os.environ.get(var)
+        pin, source = os.environ.get(var), f"${var}"
     if not pin:
         import getpass
         try:
             pin = getpass.getpass(prompt)
         except EOFError:
             pin = ""
+        source = "the prompt"
     if not pin:
         print(f"❌ Empty PIN — not sending it to the token (a failed login "
               f"spends one of the PIN attempts). Use --pin, ${PIN_ENV} or "
               f"type it at the prompt.", file=sys.stderr)
+        raise SystemExit(2)
+    return check_pin(pin, source)
+
+
+def pin_problem(pin: str) -> Optional[str]:
+    """
+    What in ``pin`` nobody types, or None. Never quotes the PIN.
+
+    pin_file is read strictly (config._read_pin_file), but a PIN from the
+    environment or --pin went to C_Login as it was, and these are routine:
+
+    - ``export SEDO_PIN=$(cat pin.txt)`` of a file saved on Windows: $(…)
+      drops the LF and keeps the CR, "1234\\r";
+    - cmd ``set SEDO_PIN=1234 && sedo-client …``: the space before && is part
+      of the value, "1234 ";
+    - a PIN copied from a document or a chat, with a zero-width space or a
+      no-break space at the end.
+
+    Each is a wrong PIN on every run, one of the 15 attempts of an Almaz-1K
+    each time, so it is refused before the token sees it. A space inside the
+    PIN is allowed.
+    """
+    if pin != pin.strip():
+        return ("leading or trailing whitespace (cmd keeps the space before && in "
+                "`set VAR=… && …`; $(cat file) keeps the CR of a Windows line end)")
+    if any(unicodedata.category(ch).startswith("C") for ch in pin):
+        return "control or invisible characters (a line break, a NUL, a zero-width character)"
+    return None
+
+
+def check_pin(pin: str, source: str) -> str:
+    """``pin`` unchanged, or exit 2 naming ``source`` (never the PIN) and the problem."""
+    problem = pin_problem(pin)
+    if problem:
+        print(f"❌ The PIN from {source} has {problem} — not sending it to the token "
+              f"(a failed login spends one of the PIN attempts).", file=sys.stderr)
         raise SystemExit(2)
     return pin
 

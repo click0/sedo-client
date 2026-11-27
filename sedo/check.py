@@ -100,14 +100,24 @@ def _module_for(profile):
 
 
 def _pin_source(profile, is_auth_key: bool) -> tuple:
-    from ._console import PIN_ENV
+    from ._console import PIN_ENV, pin_problem
+    # The same check the login makes (pin_problem): a CR from $(cat file) or a
+    # space before cmd's && is found here, without spending an attempt.
     if profile.pin:
+        problem = pin_problem(profile.pin)
+        if problem:
+            return FAIL, f"PIN у файлі конфігу: {problem}"
         return WARN, "PIN записано у файлі конфігу (краще pin_env або pin_file)"
     var = profile.effective_pin_env
-    if os.environ.get(var):
-        return OK, f"PIN: ${var} задано"
-    if is_auth_key and os.environ.get(PIN_ENV):
-        return OK, f"PIN: ${PIN_ENV} задано (${var} — ні)"
+    for name, note in ((var, ""), (PIN_ENV, f" (${var} — ні)")):
+        if name == PIN_ENV and not is_auth_key:
+            continue
+        value = os.environ.get(name)
+        if value:
+            problem = pin_problem(value)
+            if problem:
+                return FAIL, f"PIN: ${name}{note}: {problem}"
+            return OK, f"PIN: ${name} задано{note}"
     if profile.pin_file:
         from .config import ConfigError, _read_pin_file
         p = Path(profile.pin_file).expanduser()
