@@ -9,7 +9,7 @@ via the Almaz-1K USB token and IIT "Користувач ЦСК-1" (End User).
 Author:   Vladyslav V. Prodan
 Contact:  github.com/click0
 Phone:    +38(099)6053340
-Version:  0.37
+Version:  0.38
 License:  BSD 3-Clause "New" or "Revised" License
 Year:     2025-2026
 ```
@@ -361,12 +361,12 @@ To cut a release, bump the version + `CHANGELOG.md`, merge to `main`, then
 either push a tag:
 
 ```bash
-git tag v0.37
-git push origin v0.37
+git tag v0.38
+git push origin v0.38
 ```
 
 or, from the web UI: *Releases → Draft a new release → Choose a tag → type
-`v0.37` → Create new tag on publish* (target `main`). The tag push triggers
+`v0.38` → Create new tag on publish* (target `main`). The tag push triggers
 `release.yml`, which fills in the notes and assets.
 
 ## Related projects
